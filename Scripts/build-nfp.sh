@@ -1,0 +1,113 @@
+#!/bin/bash
+
+set -euo pipefail
+
+FW_TREE="$HOME/master/modified-nfp-firmware"
+DRV_TREE="$HOME/master/modified-nfp-driver"
+FW_NAME="nic_AMDA0096-0001_2x10.nffw"
+FW_DST_DIR="/lib/firmware/netronome"
+NFP_IF="enp2s0np0"
+NFP_MAC="$(ip -br link show "$NFP_IF" | awk '{print $3}')" || true
+MY_IP="10.111.0.3/24"
+PEER_IP="10.111.0.1"
+SKIP_FW=false
+SKIP_DRIVER=false
+SKIP_CHECK=false
+CLEAN=false
+
+for arg in "$@"; do
+  case "$arg" in
+    --skip-fw)     SKIP_FW=true ;;
+    --skip-driver) SKIP_DRIVER=true ;;
+    --skip-check)  SKIP_CHECK=true ;;
+    --clean)       CLEAN=true ;;
+    *) echo "Unknown argument: $arg" ;;
+  esac
+done
+
+# ============ BUILD FIRMWARE ================
+if [ "$SKIP_FW" = false ]; then
+  echo "== Build firmware =="
+  cd "$FW_TREE"
+  if [ "$CLEAN" ]; then
+      make clean
+  fi
+  make "nic/$FW_NAME"
+
+  # Remove previously loaded firmware
+  cd "$FW_DST_DIR"
+  rm -r "$FW_DST_DIR/*"
+
+  echo "== Install firmware =="
+  cp -r "$FW_TREE/nic-firmware/firmware/nffw/*" .
+  cp ./nic/* .
+
+  # Reload nfp kernel module with new firmware if we skip driver updates
+  if [ "$SKIP_DRIVER" = true ]; then
+    echo "== Reload driver =="
+    depmod -a
+    rmmod nfp 2>/dev/null || true
+    modprobe nfp nfp_dev_cpp=1
+  fi
+  update-initramfs -u
+
+else
+  echo "== Skipping firmware build/install =="
+fi
+
+# ============ BUILD DRIVER ==================
+if [ "$SKIP_DRIVER" = false ]; then
+  echo "== Build driver =="
+  cd "$DRV_TREE"
+  if [ "$CLEAN" ]; then
+      make clean
+  fi
+  make
+  make install
+
+  echo "== Reload driver =="
+  depmod -a
+  rmmod nfp 2>/dev/null || true
+  modprobe nfp nfp_dev_cpp=1
+  update-initramfs -u
+
+  # Can configure ip here if netplan/nm does not
+
+else
+  echo "== Skipping driver build/install =="
+fi
+
+# ============ HEALTH CHECKS ==================
+if [ "$SKIP_CHECK" = false ]; then
+  echo "== Quick health checks =="
+  echo "-- module path/version --"
+  modinfo -n nfp
+  modinfo nfp | egrep -i 'version|o-o-t|filename' || true
+
+  echo "-- check firmware logs if loaded and no errors --"
+  dmesg | egrep -i -f nfp -e firmware | tail -n 50
+
+  echo "-- firmware files present --"
+  ls -l "$FW_DST_DIR" | sed -n '1,200p'
+
+  echo "-- driver bound to interface --"
+  ethtool -i "$NFP_IF" || true
+
+  echo "-- offloads (expect TSO on) --"
+  ethtool -k "$NFP_IF" | egrep 'tcp-segmentation-offload'
+
+  echo "-- IP address of Netronome interface (should be 10.111.0.1/24) --"
+  ip -4 addr show "$NFP_IF"
+
+  echo "-- connectivity over the direct link --"
+  ping -c 3 "$PEER_IP" || true
+
+  echo "-- internet connectivity (default gateway should be via motherboard NIC) --"
+  ip route get 8.8.8.8
+
+  echo "-- active qdisc on interface (should be fq)"
+  tc qdisc show dev "$NFP_IF"
+
+else
+  echo "== Skipping health checks =="
+fi
