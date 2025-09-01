@@ -208,7 +208,7 @@ __lmem uint64_t current_time;
 
 
 __export __emem uint32_t wire_debug[1024*1024];
-__export __emem uint32_t wire_debug_idx;
+__export __emem uint32_t wire_debug_idx;                                            // K: not used
 
 __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
 
@@ -218,7 +218,7 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
  * being written to the work ring. 
  * Its contents can be read using "nfp-rtsym _wire_debug"
 */
-#define DEBUG(_a, _b, _c, _d) do { \
+#define DEBUG(_a, _b, _c, _d) do { \                                                // K: why use batch_out.pkt6.__raw[2/3] specifically? why not other xwrite? why not more xwrite in parallel?
     if (1 && (debug_index < (1024 * 1024))) { \
         SIGNAL debug_sig;    \
         batch_out.pkt6.__raw[2] = _a; \
@@ -261,7 +261,7 @@ __intrinsic void pace_mem_read32(__xread void *data, __mem40 void *addr, const s
 
 /* Copy current value of timestamp registers into current_time*/
 __intrinsic void
-pace_update_current_time() {
+pace_update_current_time() {                                                    // K: check if this copies both at once. Chance of high changing while reading low is 1 in 65 719 000 000 
     __gpr uint32_t ticks_low;
     __gpr uint32_t ticks_high;
 
@@ -432,7 +432,7 @@ pace_queue_push(__lmem struct pace_packet_queue* queue, __lmem struct pace_enque
     } else {
         __gpr uint8_t i = queue->length;
 
-        while (i > 0 && (queue->packets[i - 1].send_time <= packet->send_time)) {
+        while (i > 0 && (queue->packets[i - 1].send_time <= packet->send_time)) { // K: try to insert packet at start of queue first, if it should be last in queue we will need to move whole queue forward!
             queue->packets[i] = queue->packets[i - 1];
 
             i--;
