@@ -4,10 +4,11 @@ set -euo pipefail
 
 FW_TREE="$HOME/master/modified-nfp-firmware"
 DRV_TREE="$HOME/master/modified-nfp-driver"
+ORG_FW_TREE="$HOME/master/org-nfp-firmware"
+ORG_DRV_TREE="$HOME/master/org-nfp-driver"
 FW_NAME="nic_AMDA0096-0001_2x10.nffw"
 FW_DST_DIR="/lib/firmware/netronome"
 NFP_IF="enp2s0np0"
-NFP_MAC="$(ip -br link show "$NFP_IF" | awk '{print $3}')" || true
 MY_IP="10.111.0.3/24"
 PEER_IP="10.111.0.1"
 SKIP_FW=false
@@ -17,11 +18,15 @@ CLEAN=false
 
 for arg in "$@"; do
   case "$arg" in
-    --skip-fw)     SKIP_FW=true ;;
-    --skip-driver) SKIP_DRIVER=true ;;
-    --skip-check)  SKIP_CHECK=true ;;
-    --clean)       CLEAN=true ;;
-    *) echo "Unknown argument: $arg" ;;
+    --skip-fw)      SKIP_FW=true ;;
+    --skip-driver)  SKIP_DRIVER=true ;;
+    --skip-check)   SKIP_CHECK=true ;;
+    --clean)        CLEAN=true ;;
+    --org)          FW_TREE="$ORG_FW_TREE"; DRV_TREE="$ORG_DRV_TREE" ;;
+    --org-fw)       FW_TREE="$ORG_FW_TREE" ;;
+    --org-driver)   DRV_TREE="$ORG_DRV_TREE" ;;
+    --help)         echo " usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)" ;;
+    *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)" ;;
   esac
 done
 
@@ -49,7 +54,7 @@ if [ "$SKIP_FW" = false ]; then
     rmmod nfp 2>/dev/null || true
     modprobe nfp nfp_dev_cpp=1
   fi
-  update-initramfs -u
+  update-initramfs -u 2>/dev/null
 
 else
   echo "== Skipping firmware build/install =="
@@ -69,7 +74,7 @@ if [ "$SKIP_DRIVER" = false ]; then
   depmod -a
   rmmod nfp 2>/dev/null || true
   modprobe nfp nfp_dev_cpp=1
-  update-initramfs -u
+  update-initramfs -u 2>/dev/null
 
   # Can configure ip here if netplan/nm does not
 
