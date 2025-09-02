@@ -85,31 +85,40 @@ fi
 # ============ HEALTH CHECKS ==================
 if [ "$SKIP_CHECK" = false ]; then
   echo "== Quick health checks =="
+  echo ""
   echo "-- module path/version --"
   modinfo -n nfp
   modinfo nfp | egrep -i 'version|o-o-t|filename' || true
 
+  echo ""
   echo "-- check firmware logs if loaded and no errors --"
-  dmesg | egrep -i -f nfp -e firmware | tail -n 50
+  dmesg | grep nfp | tail -n 40 || true
 
+  echo ""
   echo "-- firmware files present --"
   ls -l "$FW_DST_DIR" | sed -n '1,200p'
 
+  echo ""
   echo "-- driver bound to interface --"
   ethtool -i "$NFP_IF" || true
 
+  echo ""
   echo "-- offloads (expect TSO on) --"
   ethtool -k "$NFP_IF" | egrep 'tcp-segmentation-offload'
 
+  echo ""
   echo "-- IP address of Netronome interface (should be 10.111.0.1/24) --"
   ip -4 addr show "$NFP_IF"
 
+  echo ""
   echo "-- connectivity over the direct link --"
   ping -c 3 "$PEER_IP" || true
 
+  echo ""
   echo "-- internet connectivity (default gateway should be via motherboard NIC) --"
   ip route get 8.8.8.8
 
+  echo ""
   echo "-- active qdisc on interface (should be fq)"
   tc qdisc show dev "$NFP_IF"
 
