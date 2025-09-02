@@ -127,6 +127,7 @@ struct pace_enqueued_packet {
  * Packet queue for storing packets waiting to be paced out
  */
 struct pace_packet_queue {
+    // TODO: Gi mer memory til disse hvis oeker queue length
     uint8_t length;
     uint64_t next_send_time;    /* Time at which the next packet in the queue should be transmitted */
 
@@ -171,19 +172,11 @@ struct pace_connection_queue {
     struct pace_connection connections[PACE_MAX_CONNECTIONS];
 };
 
-/* Enable this to reduce pacing rate by 20 percent. 
-   The amount to reduce by may need tweaking to avoid proportional overhead as much as possible*/
-// REDUCE_PACING_RATE
-
 /**
  * Convert microseconds to number of timestamp register clock ticks.
  * Timestamp register is incremented every 16th clock cycle, and the Agilio CX's ME's run at 800 MHz.
  */
-#ifndef REDUCE_PACING_RATE
-#define PACE_US_TO_TICKS(us) us*(800/16)
-#else
-#define PACE_US_TO_TICKS(us) us*(640/16)
-#endif
+# define PACE_US_TO_TICKS(us) us*(800/16)
 
 /* Preconfigured number of ticks to pace out packets by */
 #define PACE_DELAY_TIME_TICKS PACE_US_TO_TICKS(10000)
@@ -208,7 +201,7 @@ __lmem uint64_t current_time;
 
 
 __export __emem uint32_t wire_debug[1024*1024];
-__export __emem uint32_t wire_debug_idx;                                            // K: not used
+__export __emem uint32_t wire_debug_idx;
 
 __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
 
@@ -218,7 +211,7 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
  * being written to the work ring. 
  * Its contents can be read using "nfp-rtsym _wire_debug"
 */
-#define DEBUG(_a, _b, _c, _d) do { \                                                // K: why use batch_out.pkt6.__raw[2/3] specifically? why not other xwrite? why not more xwrite in parallel?
+#define DEBUG(_a, _b, _c, _d) do { \
     if (1 && (debug_index < (1024 * 1024))) { \
         SIGNAL debug_sig;    \
         batch_out.pkt6.__raw[2] = _a; \
@@ -261,7 +254,7 @@ __intrinsic void pace_mem_read32(__xread void *data, __mem40 void *addr, const s
 
 /* Copy current value of timestamp registers into current_time*/
 __intrinsic void
-pace_update_current_time() {                                                    // K: check if this copies both at once. Chance of high changing while reading low is 1 in 65 719 000 000 
+pace_update_current_time() {
     __gpr uint32_t ticks_low;
     __gpr uint32_t ticks_high;
 
@@ -395,7 +388,7 @@ __intrinsic void pace_pre_queue_push(__lmem struct pace_packet_pre_queue* queue,
 
 /* Remove the first packet from the pre-queue */
 __intrinsic void pace_pre_queue_pop(__lmem struct pace_packet_pre_queue* queue) {
-    if (queue->length == 0) {
+    if (queue->length == 0) { // TODO: hvordan deale med tom queue?
         return;
     } else {
         queue->head = (queue->head + 1) % PACE_MAX_PRE_QUEUE_LENGTH;
@@ -432,7 +425,7 @@ pace_queue_push(__lmem struct pace_packet_queue* queue, __lmem struct pace_enque
     } else {
         __gpr uint8_t i = queue->length;
 
-        while (i > 0 && (queue->packets[i - 1].send_time <= packet->send_time)) { // K: try to insert packet at start of queue first, if it should be last in queue we will need to move whole queue forward!
+        while (i > 0 && (queue->packets[i - 1].send_time <= packet->send_time)) {
             queue->packets[i] = queue->packets[i - 1];
 
             i--;
@@ -974,7 +967,6 @@ do {                                                                            
                     &signal);                                                                    \
 } while (0)
 
-
 /**
  * Set the seq_num of a packet. Host packets will be egressed in the order in which their seq_num was set.
  * NOTE: This function seems to behave as expected when NUM_SEQRS is set to a higher number, but this has not been tested extensively.
@@ -984,7 +976,7 @@ pace_set_seq_num(__lmem struct nfd_in_pkt_desc* packet) {
 #if (NFD_IN_NUM_SEQRS == 1)
         packet->seq_num = dst_q_seqn;                                
         dst_q_seqn++;
-        //DEBUG(0x53c1, packet->seq_num, 0, __MEID << 16 | ctx());                                               
+        DEBUG(0x53c1, packet->seq_num, 0, __MEID << 16 | ctx());                                               
 #else
     __gpr uint32_t seqr_num = NFD_IN_SEQR_NUM(packet->q_num);
 
@@ -992,7 +984,6 @@ pace_set_seq_num(__lmem struct nfd_in_pkt_desc* packet) {
     seq_nums[seqr_num]++;
 #endif
 }
-
 
 /**
  * Remove and process packet descriptors stored in the pre-queue.
@@ -1065,7 +1056,6 @@ __intrinsic void pace_add_work(__lmem struct nfd_in_pkt_desc* pkt_desc, uint8_t 
             return;   
     }
 }
-
 
 /**
  * Transmit any packets enqueued in the packet queue which are ready to be transmitted.
@@ -1544,7 +1534,6 @@ _pace_notify(__shared __gpr unsigned int *complete,
     }
 }
 
-
 /**
  * Process a batch of issued-descriptors from a given Issue ME
  * Args:
@@ -1567,7 +1556,6 @@ pace_notify(int side)
                 LSO_PKT_XFER_START1);
     }
 }
-
 
 /**
  * Participate in reordering with the workers
@@ -1692,7 +1680,7 @@ main(void)
             }
         } else {
             for (;;) {
-                pace_notify(0); // Worker processing loop
+                pace_notify(0); 
             }
         }
 #else
@@ -1714,7 +1702,7 @@ main(void)
             }
         } else {
             for (;;) {
-                pace_notify(1); // Worker processing loop
+                pace_notify(1);
             }
         }
 #else
