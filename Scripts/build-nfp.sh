@@ -51,7 +51,7 @@ if [ "$SKIP_FW" = false ]; then
   rm -rf "$FW_DST_DIR"/*
 
   echo "== Install firmware =="
-  cp -r "$FW_TREE/nic-firmware/firmware/nffw"/* "$FW_DST_DIR"/
+  cp -r "$FW_TREE/firmware/nffw"/* "$FW_DST_DIR"/
   cp "$FW_DST_DIR"/nic/* "$FW_DST_DIR"/
 
   # Reload nfp kernel module with new firmware if we skip driver updates
