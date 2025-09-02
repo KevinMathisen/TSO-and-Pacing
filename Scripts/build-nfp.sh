@@ -2,6 +2,11 @@
 
 set -euo pipefail
 
+if (( EUID != 0 )); then
+  echo "Please run as root (sudo)."
+  exit 1
+fi
+
 FW_TREE="$HOME/master/modified-nfp-firmware"
 DRV_TREE="$HOME/master/modified-nfp-driver"
 ORG_FW_TREE="$HOME/master/org-nfp-firmware"
@@ -26,26 +31,28 @@ for arg in "$@"; do
     --org-fw)       FW_TREE="$ORG_FW_TREE" ;;
     --org-driver)   DRV_TREE="$ORG_DRV_TREE" ;;
     --help)         echo " usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)"; exit 0 ;;
-    *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)" ;;
+    *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)"; exit 1 ;;
   esac
 done
+
+[ -d "$FW_TREE" ] || { echo "Missing FW_TREE: $FW_TREE"; exit 1; }
+[ -d "$DRV_TREE" ] || { echo "Missing DRV_TREE: $DRV_TREE"; exit 1; }
 
 # ============ BUILD FIRMWARE ================
 if [ "$SKIP_FW" = false ]; then
   echo "== Build firmware =="
   cd "$FW_TREE"
-  if [ "$CLEAN" ]; then
+  if [ "$CLEAN" = true ]; then
       make clean
   fi
   make "nic/$FW_NAME"
 
   # Remove previously loaded firmware
-  cd "$FW_DST_DIR"
-  rm -r "$FW_DST_DIR/*"
+  rm -rf "$FW_DST_DIR"/*
 
   echo "== Install firmware =="
-  cp -r "$FW_TREE/nic-firmware/firmware/nffw/*" .
-  cp ./nic/* .
+  cp -r "$FW_TREE/nic-firmware/firmware/nffw"/* "$FW_DST_DIR"/
+  cp "$FW_DST_DIR"/nic/* "$FW_DST_DIR"/
 
   # Reload nfp kernel module with new firmware if we skip driver updates
   if [ "$SKIP_DRIVER" = true ]; then
@@ -64,7 +71,7 @@ fi
 if [ "$SKIP_DRIVER" = false ]; then
   echo "== Build driver =="
   cd "$DRV_TREE"
-  if [ "$CLEAN" ]; then
+  if [ "$CLEAN" = true ]; then
       make clean
   fi
   make
@@ -75,8 +82,6 @@ if [ "$SKIP_DRIVER" = false ]; then
   rmmod nfp 2>/dev/null || true
   modprobe nfp nfp_dev_cpp=1
   update-initramfs -u 2>/dev/null
-
-  # Can configure ip here if netplan/nm does not
 
 else
   echo "== Skipping driver build/install =="
@@ -116,7 +121,7 @@ if [ "$SKIP_CHECK" = false ]; then
 
   echo ""
   echo "-- internet connectivity (default gateway should be via motherboard NIC) --"
-  ip route get 8.8.8.8
+  ping -c 3 8.8.8.8 || true
 
   echo ""
   echo "-- active qdisc on interface (should be fq)"
