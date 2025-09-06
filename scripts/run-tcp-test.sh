@@ -7,8 +7,8 @@ if (( EUID != 0 )); then
 fi
 
 NFP_IF="enp2s0np0"
-IP1="10.111.0.1"
-IP2="10.111.0.3"
+IP1="10.111.0.3"
+IP2="10.111.0.1"
 SENDER=kevinnm@192.168.1.98
 DUR=5   # seconds to run (assuming 10Gb/s, will result in under 1GB pcap file)
 FLOWS=2 # parallel flows to run
@@ -68,20 +68,11 @@ SRV_PID=$!
 echo ""
 echo "Starting packet capture (pinned to cpu 2)"
 # (ignore ACKs for now, and pin to cpu 2 to keep cpu 3 as idle as possible. )
-sudo chrt -f 20 netsniff-ng \
-  --in "$NFP_IF" \
-  --out "$OUT" \
-  --interval 1GiB \
-  --prefix cap- \
-  --snaplen 128 \
+chrt -f 20 netsniff-ng --in "$NFP_IF" --out "$OUT" \
+  --interval 1GiB --prefix cap- --silent \
   --filter "tcp and host $IP2 and dst port 5201" \
-  --bind-cpu 2 \
-  --notouch-irq \
-  --sg \
-  --silent \
-  -T 0xa1b23c4d \          
-  --ring-size 128MiB \
-  > "$OUT/capture.log" 2>&1 &
+  --bind-cpu 2 --notouch-irq --sg --ring-size 128MiB -T 0xa1b23c4d \
+  >"$OUT/capture.log" 2>&1 &
 PC_PID=$!
 sleep 1
 
