@@ -51,8 +51,8 @@ umount "$OUT" 2>/dev/null || true
 mount -t tmpfs -o size=3G tmpfs "$OUT"
 
 echo "Disabling GRO and LRO on $NFP_IF"
-ethtool -K "$NFP_IF" gro off lro off
-ethtool -C "$NFP_IF" adaptive-rx off rx-usecs 0 rx-frames 1
+ethtool -K "$NFP_IF" gro off lro off || true
+ethtool -C "$NFP_IF" adaptive-rx off rx-usecs 0 rx-frames 1 || true
 
 pin_rx_to_cpu3
 
