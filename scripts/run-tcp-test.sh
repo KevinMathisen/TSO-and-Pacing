@@ -94,7 +94,8 @@ echo ""
 echo "Save $NFP_IF stats after test"
 ethtool -S "$NFP_IF" > "$OUT/ethtool_stats.after"
 
-echo "Copying output to $PERSIST"
+echo "Copying output to $PERSIST (overwriting existing data)"
+rm -rf "$PERSIST"/*
 cp -a "$OUT"/cap-* "$OUT"/*.log "$OUT"/ethtool_stats* "$PERSIST"/
 
 umount "$OUT"
