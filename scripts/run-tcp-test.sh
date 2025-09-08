@@ -10,7 +10,7 @@ NFP_IF="enp2s0np0"
 IP1="10.111.0.3"
 IP2="10.111.0.1"
 SENDER=kevinnm@192.168.1.98
-DUR=5   # seconds to run (assuming 10Gb/s, will result in under 1GB pcap file)
+DUR=1   # seconds to run
 FLOWS=2 # parallel flows to run
 OUT=/tmp/tcp-test-output
 PERSIST=/var/tmp/tcp-test-output
@@ -18,6 +18,7 @@ mkdir -p "$OUT"
 mkdir -p "$PERSIST"
 
 pin_rx_to_cpu3() {
+  # Dont need to revert changes to netronome card as it is only used for testing
   echo "Pinning all received packets on $NFP_IF to cpu 3"
 
   # stop irqbalance so it doesnt move around IRQs
@@ -94,7 +95,7 @@ echo "Save $NFP_IF stats after test"
 ethtool -S "$NFP_IF" > "$OUT/ethtool_stats.after"
 
 echo "Copying output to $PERSIST"
-cp -a "$OUT"/cap-* "$OUT"/*.log "$PERSIST"/
+cp -a "$OUT"/cap-* "$OUT"/*.log "$OUT"/ethtool_stats* "$PERSIST"/
 
 umount "$OUT"
 
