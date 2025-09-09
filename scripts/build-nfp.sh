@@ -125,6 +125,7 @@ if [ "$SKIP_CHECK" = false ]; then
 
   echo ""
   echo "-- active qdisc on interface (should be fq)"
+  tc qdisc replace dev enp2s0np0 root fq
   tc qdisc show dev "$NFP_IF"
 
 else
