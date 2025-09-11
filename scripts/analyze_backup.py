@@ -19,13 +19,13 @@ def _interval_overlap_and_union(intervals: list[tuple[int, int]], a: int, b: int
                 inserted = True
             out.append((s, e))
             continue
-        # Overlap case
+        # packet seq overlaps with already received:
         overl += max(0, min(e, new_b) - max(s, new_a))
         new_a = min(new_a, s)
         new_b = max(new_b, e)
     if not inserted:
         out.append((new_a, new_b))
-    # Keep sorted
+
     out.sort(key=lambda x: x[0])
     return overl, out
 
