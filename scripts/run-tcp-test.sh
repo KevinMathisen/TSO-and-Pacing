@@ -18,6 +18,9 @@ mkdir -p "$OUT"
 mkdir -p "$PERSIST"
 
 pin_rx_to_cpu3() {
+  # Can look into setting the frequency of CPU 3 to constant
+  # sudo cpufreq-set -g performance
+
   # Dont need to revert changes to netronome card as it is only used for testing
   echo "Pinning all received packets on $NFP_IF to cpu 3"
 
