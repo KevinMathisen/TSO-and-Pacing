@@ -38,9 +38,13 @@ gunzip -f "$RUN_DIR/merged-pruned.pcap.gz"
 
 echo ""
 echo "Create CSV from pcap"
-tshark -r "$RUN_DIR/merged-pruned.pcap" \
+tshark -n -r "$RUN_DIR/merged-pruned.pcap" \
   -T fields -E header=y -E separator=, \
-  -e frame.time_epoch -e frame.len -e tcp.stream -e tcp.seq \
+  -o tcp.desegment_tcp_streams:FALSE \
+  -o ip.defragment:FALSE -o ipv6.defragment:FALSE \
+  -o tcp.check_checksum:FALSE \
+  -e frame.time_epoch -e frame.len -e tcp.stream -e tcp.seq -e tcp.len \
+  -e tcp.analysis.retransmission -e tcp.analysis.out_of_order -e tcp.analysis.lost_segment \
   > "$CSV_OUT.tmp"
 
 echo "(ensuring packets are sorted)"
@@ -49,10 +53,7 @@ rm -f "$CSV_OUT.tmp"
 
 echo ""
 echo "Generating metrics from csv"
-# python3 analyze_tcp_capture.py \
-#   --csv ./packets.csv \
-#   --out ./metrics \
-#   --bin_ms 1 \
+cd "$RUN_DIR"
+python3 ./../../analyze_tcp_capture.py
 
 echo ""
-echo "Analysis done"
