@@ -33,7 +33,7 @@ for arg in "$@"; do
     --org-fw)       FW_TREE="$ORG_FW_TREE" ;;
     --org-driver)   DRV_TREE="$ORG_DRV_TREE" ;;
     --help)         echo " usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)"; exit 0 ;;
-    *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)"; exit 1 ;;
+    *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --skip-build --clean --org --org-fw --org-driver)"; exit 1 ;;
   esac
 done
 
