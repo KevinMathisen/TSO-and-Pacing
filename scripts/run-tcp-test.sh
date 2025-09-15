@@ -18,8 +18,8 @@ mkdir -p "$OUT"
 mkdir -p "$PERSIST"
 
 pin_rx_to_cpu3() {
-  # Can look into setting the frequency of CPU 3 to constant
-  # sudo cpufreq-set -g performance
+  # set core 3 to performance mode (instead of powersave)
+  sudo cpufreq-set -c 3 -g performance 
 
   # Dont need to revert changes to netronome card as it is only used for testing
   echo "Pinning all received packets on $NFP_IF to cpu 3"
@@ -38,7 +38,7 @@ pin_rx_to_cpu3() {
   echo 0 | tee /proc/sys/net/core/rps_sock_flow_entries >/dev/null
 
 
-  # get rx interrupt (IRQ) number for the nic queue (we know we only have rxtx-0)
+  # get rx interrupt request (IRQ) number for the nic queue (we know we only have rxtx-0)
   IRQ=$(awk -v iface="$NFP_IF" '$0 ~ iface && /rxtx-0/ { gsub(/:/,"",$1); print $1; exit }' /proc/interrupts)
   
   MASK=8 # 8 is mask for cpu 3, can set ut to this if we want other cpus: $(printf '%x' $((1<<3)))
@@ -56,6 +56,7 @@ mount -t tmpfs -o size=3G tmpfs "$OUT"
 
 echo "Disabling GRO and LRO on $NFP_IF"
 ethtool -K "$NFP_IF" gro off lro off || true
+# set interupts created for each packet after delay of 0 us
 ethtool -C "$NFP_IF" adaptive-rx off rx-usecs 0 rx-frames 1 || true
 
 pin_rx_to_cpu3
@@ -103,5 +104,6 @@ cp -a "$OUT"/cap-* "$OUT"/*.log "$OUT"/ethtool_stats* "$PERSIST"/
 chown -R kevinnm:kevinnm "$PERSIST"
 
 umount "$OUT"
+sudo cpufreq-set -c 3 -g powersave
 
 echo "Test finished sucessfully, output in $PERSIST"
