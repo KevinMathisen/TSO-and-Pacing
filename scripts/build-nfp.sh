@@ -130,8 +130,9 @@ if [ "$SKIP_CHECK" = false ]; then
   ping -c 3 8.8.8.8 || true
 
   echo ""
-  echo "-- active qdisc on interface (should be fq)"
+  echo "-- active qdisc on interface (should be fq with maxrate 500Mb)"
   tc qdisc replace dev enp2s0np0 root fq
+  tc qdisc replace dev enp2s0np0 root fq maxrate 500mbit pacing
   tc qdisc show dev "$NFP_IF"
 
 else

@@ -12,7 +12,6 @@ IP2="10.111.0.1"
 SENDER=kevinnm@192.168.1.98
 DUR=1   # seconds to run
 FLOWS=2 # parallel flows to run
-PACING_RATE_PER_FLOW="500M" # should total to 1Gb/s
 OUT=/tmp/tcp-test-output
 PERSIST=/var/tmp/tcp-test-output
 mkdir -p "$OUT"
@@ -89,7 +88,7 @@ echo ""
 echo "Starting sending data on netronome2"
 # (2 flows, 4MB window size, 256KB read from buffer each send call, send output to client)
 ssh -o StrictHostKeyChecking=no "$SENDER" \
-  "iperf3 -c $IP1 -t $DUR -i 1 -w 4M -l 256K -P $FLOWS --fq-rate $PACING_RATE_PER_FLOW --get-server-output" \
+  "iperf3 -c $IP1 -t $DUR -i 1 -w 4M -l 256K -P $FLOWS --get-server-output" \
   | tee "$OUT/iperf_client.log"
 
 echo ""
