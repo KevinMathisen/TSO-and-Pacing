@@ -6,6 +6,7 @@ import matplotlib as mp
 mp.use("Agg")
 import matplotlib.pyplot as plt
 import re
+import sys
 from pathlib import Path
 
 # Constants
@@ -21,6 +22,8 @@ AFTER_STATS_FILE_NAME = "./ethtool_stats.after"
 health_metrics = {}
 aggregate_metrics = {}
 per_flow_metrics = {}
+
+EXPERIMENT_NAME = ""
 
 # ------ functions for generating per-flow metrics --------------------------------------------------------------------------------------------
 
@@ -140,6 +143,7 @@ def _build_micro_timeseries(t: np.ndarray, width_us: int) -> tuple[pd.DataFrame]
     for bin_index, gap_us in zip(packets_bin_num[1:], packet_gaps_us):  # ignore first packet, as no gap
         gaps_grouped_by_bin[bin_index].append(gap_us)
 
+    # have to use this, got errors for running np.quantile on empty arrays when not
     def safe_quantile(gaps, percentile):
         if not gaps: return np.nan
         if len(gaps) == 1: return float(gaps[0])
@@ -251,7 +255,7 @@ def plot_flow_micro_timeseries(flow_id: int, df_micro: pd.DataFrame, plots_dir: 
     axes[1].grid(True, alpha=0.3)
 
     fig.tight_layout()
-    fig.savefig(plots_dir / f"flow_{flow_id}_ipg_timeseries_{MICRO_BIN_US}us.png", dpi=300)
+    fig.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ipg_timeseries_{MICRO_BIN_US}us.png", dpi=300)
     plt.close(fig)
 
 def plot_flow_ms_events(flow_id: int, df_ms: pd.DataFrame, plots_dir: Path):
@@ -283,7 +287,7 @@ def plot_flow_ms_events(flow_id: int, df_ms: pd.DataFrame, plots_dir: Path):
     axes[1].set_ylim(bottom=0)
 
     fig.tight_layout()
-    fig.savefig(plots_dir / f"flow_{flow_id}_events_{MS_BIN}ms.png", dpi=300)
+    fig.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_events_{MS_BIN}ms.png", dpi=300)
     plt.close(fig)
 
 def plot_flow_ipg_histograms(flow_id: int, gaps_us: np.ndarray, plots_dir: Path):
@@ -311,7 +315,7 @@ def plot_flow_ipg_histograms(flow_id: int, gaps_us: np.ndarray, plots_dir: Path)
     ax.set_xticks(np.arange(0, max_x + 1, 50))
 
     plt.tight_layout()
-    plt.savefig(plots_dir / f"flow_{flow_id}_ipg_hist_full.png", dpi=300)
+    plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ipg_hist_full.png", dpi=300)
     plt.close(fig)
 
     # zoomed in plot
@@ -330,7 +334,7 @@ def plot_flow_ipg_histograms(flow_id: int, gaps_us: np.ndarray, plots_dir: Path)
     ax.set_xticks(np.arange(0, max_x + 1, 1))
 
     plt.tight_layout()
-    plt.savefig(plots_dir / f"flow_{flow_id}_ipg_hist_zoom.png", dpi=300)
+    plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ipg_hist_zoom.png", dpi=300)
     plt.close(fig)
 
 def plot_flow_ppb_hist(flow_id: int, t: np.ndarray, plots_dir: Path):
@@ -358,7 +362,7 @@ def plot_flow_ppb_hist(flow_id: int, t: np.ndarray, plots_dir: Path):
     ax.set_xticks(np.arange(0, max_x + 1, 1))  # set x ticks increment to 1
 
     plt.tight_layout()
-    plt.savefig(plots_dir / f"flow_{flow_id}_ppb_{BIN_FOR_PPS_MEDIAN_US}us_hist.png", dpi=300)
+    plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ppb_{BIN_FOR_PPS_MEDIAN_US}us_hist.png", dpi=300)
     plt.close(fig)
 
 
@@ -659,6 +663,14 @@ def write_plots(packets: pd.DataFrame):
     metrics_dir = Path("metrics")
     metrics_dir.mkdir(exist_ok=True)
 
+    # plot ipg and ppb histogram for all flows
+    packets = packets[packets["tcp.len"] > 0].sort_values("frame.time_epoch", kind="mergesort")
+    all_t = packets["frame.time_epoch"].to_numpy(dtype=np.float64)
+    all_gaps_us = np.diff(all_t) * 1e6
+    plot_flow_ipg_histograms(1000, all_gaps_us, metrics_dir)
+    plot_flow_ppb_hist(1000, all_t, metrics_dir)
+
+    # plot per flow
     for flow_id in sorted(per_flow_metrics.keys()):
         print(f"    generating plots for flow {flow_id}...")
 
@@ -682,6 +694,11 @@ def main():
 
     # get data needed
     packets = pd.read_csv("./packets.csv")
+
+    # get experiment name if specified
+    global EXPERIMENT_NAME
+    if len(sys.argv) == 2:
+        EXPERIMENT_NAME = sys.argv[1]
 
     print_test_health_check()
 
