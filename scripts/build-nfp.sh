@@ -19,6 +19,7 @@ PEER_IP="10.111.0.1"
 SKIP_FW=false
 SKIP_DRIVER=false
 SKIP_CHECK=false
+SKIP_BUILD=false
 CLEAN=false
 
 for arg in "$@"; do
@@ -26,6 +27,7 @@ for arg in "$@"; do
     --skip-fw)      SKIP_FW=true ;;
     --skip-driver)  SKIP_DRIVER=true ;;
     --skip-check)   SKIP_CHECK=true ;;
+    --skip-build)   SKIP_BUILD=true ;;
     --clean)        CLEAN=true ;;
     --org)          FW_TREE="$ORG_FW_TREE"; DRV_TREE="$ORG_DRV_TREE" ;;
     --org-fw)       FW_TREE="$ORG_FW_TREE" ;;
@@ -40,15 +42,17 @@ done
 
 # ============ BUILD FIRMWARE ================
 if [ "$SKIP_FW" = false ]; then
-  echo "== Build firmware =="
-  cd "$FW_TREE"
-  if [ "$CLEAN" = true ]; then
-      make clean
-  fi
-  make "nic/$FW_NAME"
+  if [ "$SKIP_BUILD" = false ]; then
+    echo "== Build firmware =="
+    cd "$FW_TREE"
+    if [ "$CLEAN" = true ]; then
+        make clean
+    fi
+    make "nic/$FW_NAME"
 
-  # Remove previously loaded firmware
-  rm -rf "$FW_DST_DIR"/*
+    # Remove previously loaded firmware
+    rm -rf "$FW_DST_DIR"/*
+  fi
 
   echo "== Install firmware =="
   cp -r "$FW_TREE/firmware/nffw"/* "$FW_DST_DIR"/
@@ -69,13 +73,15 @@ fi
 
 # ============ BUILD DRIVER ==================
 if [ "$SKIP_DRIVER" = false ]; then
-  echo "== Build driver =="
-  cd "$DRV_TREE"
-  if [ "$CLEAN" = true ]; then
-      make clean
+  if [ "$SKIP_BUILD" = false ]; then
+    echo "== Build driver =="
+    cd "$DRV_TREE"
+    if [ "$CLEAN" = true ]; then
+        make clean
+    fi
+    make
+    make install
   fi
-  make
-  make install
 
   echo "== Reload driver =="
   depmod -a
