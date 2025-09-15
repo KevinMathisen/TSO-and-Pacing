@@ -9,7 +9,13 @@ SNAPLEN=128
 
 ts="$(date +%Y%m%d-%H%M%S)"
 RUN_DIR="$OUT_DIR/run-$ts"
+
+if [ $# -eq 1 ]; then
+  RUN_DIR="$OUT_DIR/$1"
+fi
+
 mkdir -p "$RUN_DIR"
+echo "Placing metrics and data in $RUN_DIR"
 
 CSV_OUT="$RUN_DIR"/packets.csv
 
@@ -54,6 +60,11 @@ rm -f "$CSV_OUT.tmp"
 echo ""
 echo "Generating metrics from csv"
 cd "$RUN_DIR"
-python3 ./../../analyze_tcp_capture.py
+
+if [ $# -eq 1 ]; then
+  python3 ./../../analyze_tcp_capture.py "$1"
+else
+  python3 ./../../analyze_tcp_capture.py
+fi
 
 echo ""
