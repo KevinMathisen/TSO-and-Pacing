@@ -12,17 +12,21 @@ IP2="10.111.0.1"
 SENDER=kevinnm@192.168.1.98
 DUR=1   # seconds to run
 FLOWS=2 # parallel flows to run
+PACING_RATE_PER_FLOW="500M" # should total to 1Gb/s
 OUT=/tmp/tcp-test-output
 PERSIST=/var/tmp/tcp-test-output
 mkdir -p "$OUT"
 mkdir -p "$PERSIST"
 
 pin_rx_to_cpu3() {
+  # Dont need to revert changes to netronome card as it is only used for testing
+  echo "Pinning all received packets on $NFP_IF to cpu 3"
+
   # set core 3 to performance mode (instead of powersave)
   sudo cpufreq-set -c 3 -g performance 
 
-  # Dont need to revert changes to netronome card as it is only used for testing
-  echo "Pinning all received packets on $NFP_IF to cpu 3"
+  # ensure gro does not batch rx packets (default is to batch 8 packets even when gro off)
+  sudo sysctl -w net.core.gro_normal_batch=1
 
   # stop irqbalance so it doesnt move around IRQs
   systemctl stop irqbalance || true
@@ -85,7 +89,7 @@ echo ""
 echo "Starting sending data on netronome2"
 # (2 flows, 4MB window size, 256KB read from buffer each send call, send output to client)
 ssh -o StrictHostKeyChecking=no "$SENDER" \
-  "iperf3 -c $IP1 -t $DUR -i 1 -w 4M -l 256K -P $FLOWS --get-server-output" \
+  "iperf3 -c $IP1 -t $DUR -i 1 -w 4M -l 256K -P $FLOWS --fq-rate $PACING_RATE_PER_FLOW --get-server-output" \
   | tee "$OUT/iperf_client.log"
 
 echo ""
@@ -104,6 +108,7 @@ cp -a "$OUT"/cap-* "$OUT"/*.log "$OUT"/ethtool_stats* "$PERSIST"/
 chown -R kevinnm:kevinnm "$PERSIST"
 
 umount "$OUT"
+# no need to restore other nic/cpu changes, as we only use machine for testing
 sudo cpufreq-set -c 3 -g powersave
 
 echo "Test finished sucessfully, output in $PERSIST"
