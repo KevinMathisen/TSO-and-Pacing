@@ -293,10 +293,10 @@ def plot_flow_ms_events(flow_id: int, df_ms: pd.DataFrame, plots_dir: Path):
 def plot_flow_ipg_histograms(flow_id: int, gaps_us: np.ndarray, plots_dir: Path):
     """
     Plot IPG histograms (zoomed in and not)
+    and CDF of same data
     """
-    MAX_US_FULL = 600
-    MAX_COUNT_FULL = 1000
-    MAX_US_ZOOM = 15
+    MAX_US_FULL = 1200
+    MAX_US_ZOOM = 60
     BIN_US_FULL = 1
     BIN_US_ZOOM = 0.25
 
@@ -304,13 +304,13 @@ def plot_flow_ipg_histograms(flow_id: int, gaps_us: np.ndarray, plots_dir: Path)
     full_edges = np.arange(0.0, MAX_US_FULL + BIN_US_FULL, BIN_US_FULL)
     fig = plt.figure(figsize=(10, 6))
     plt.hist(gaps_us, bins=full_edges)
-    plt.ylim(0.0, MAX_COUNT_FULL)
     plt.xlabel("IPG (µs)")
     plt.ylabel("Count")
     plt.title(f"Flow {flow_id} — IPG histogram (0–{MAX_US_FULL} µs, bin={BIN_US_FULL} µs)")
     plt.grid(True, alpha=0.3)
 
     ax = plt.gca()
+    ax.set_yscale("log")
     max_x = ax.get_xlim()[1]
     ax.set_xticks(np.arange(0, max_x + 1, 50))
 
@@ -331,10 +331,44 @@ def plot_flow_ipg_histograms(flow_id: int, gaps_us: np.ndarray, plots_dir: Path)
 
     ax = plt.gca()
     max_x = ax.get_xlim()[1]
-    ax.set_xticks(np.arange(0, max_x + 1, 1))
+    ax.set_xticks(np.arange(0, max_x + 1, 2))
 
     plt.tight_layout()
     plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ipg_hist_zoom.png", dpi=300)
+    plt.close(fig)
+
+    # full CDF of ipg, with x-axis scaled with log
+    sorted_gaps = np.sort(gaps_us)
+    cdf = np.linspace(0, 1, len(sorted_gaps))
+
+    fig = plt.figure(figsize=(10, 6))
+    plt.plot(sorted_gaps, cdf, label="CDF", color="blue")
+    plt.xscale("log")
+    plt.xlabel("IPG (µs)")
+    plt.ylabel("Cumulative Probability")
+    plt.title(f"Flow {flow_id} — CDF of IPG")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ipg_cdf_full.png", dpi=300)
+    plt.close(fig)
+
+    # Zoomed in CDF of ipg, with x-axis scaled with log
+    sorted_gaps = np.sort(gaps_us)
+    cdf = np.linspace(0, 1, len(sorted_gaps))
+
+    fig = plt.figure(figsize=(10, 6))
+    plt.plot(sorted_gaps, cdf, label="CDF", color="blue")
+    plt.xlim(0.0, MAX_US_ZOOM)
+    plt.xlabel("IPG (µs)")
+    plt.ylabel("Cumulative Probability")
+    plt.title(f"Flow {flow_id} — CDF of IPG")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+
+    plt.tight_layout()
+    plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ipg_cdf_zoom.png", dpi=300)
     plt.close(fig)
 
 def plot_flow_ppb_hist(flow_id: int, t: np.ndarray, plots_dir: Path):
@@ -347,6 +381,7 @@ def plot_flow_ppb_hist(flow_id: int, t: np.ndarray, plots_dir: Path):
     n_bins = int(idx.max() + 1)
     pkts_per_bin = np.bincount(idx, minlength=n_bins)
 
+    # histogram of packets per bin
     max_ppb = int(pkts_per_bin.max())
     edges = np.arange(-0.5, max_ppb + 1.5, 1.0)
 
@@ -358,11 +393,32 @@ def plot_flow_ppb_hist(flow_id: int, t: np.ndarray, plots_dir: Path):
     plt.grid(True, alpha=0.3)
     
     ax = plt.gca()
+    ax.set_yscale("log")
     max_x = ax.get_xlim()[1]
     ax.set_xticks(np.arange(0, max_x + 1, 1))  # set x ticks increment to 1
 
     plt.tight_layout()
     plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ppb_{BIN_FOR_PPS_MEDIAN_US}us_hist.png", dpi=300)
+    plt.close(fig)
+
+    # CDF of packets per 10us bin
+    sorted_ppb = np.sort(pkts_per_bin)
+    cdf = np.linspace(0, 1, (len(sorted_ppb)))
+
+    fig = plt.figure(figsize=(10, 6))
+    plt.plot(sorted_ppb, cdf, label="CDF", color="blue")
+    plt.xlabel(f"Packets per {BIN_FOR_PPS_MEDIAN_US}µs bin")
+    plt.ylabel("Cumulative Probability")
+    plt.title(f"Flow {flow_id} — CDF of Packets/{BIN_FOR_PPS_MEDIAN_US}µs-bin")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+
+    ax = plt.gca()
+    max_x = ax.get_xlim()[1]
+    ax.set_xticks(np.arange(0, max_x + 1, 1))  # set x ticks increment to 1
+
+    plt.tight_layout()
+    plt.savefig(plots_dir / f"{EXPERIMENT_NAME}_flow_{flow_id}_ppb_{BIN_FOR_PPS_MEDIAN_US}us_cdf.png", dpi=300)
     plt.close(fig)
 
 
