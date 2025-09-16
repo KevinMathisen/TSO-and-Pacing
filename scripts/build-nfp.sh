@@ -15,8 +15,6 @@ FW_NAME="nic_AMDA0096-0001_2x10.nffw"
 FW_DST_DIR="/lib/firmware/netronome"
 NFP_IF="enp2s0np0"
 DRV_DST_DIR="/lib/modules/$(uname -r)/updates/"
-MY_IP="10.111.0.3/24"
-PEER_IP="10.111.0.1"
 SKIP_FW=false
 SKIP_DRIVER=false
 SKIP_CHECK=false
@@ -131,7 +129,7 @@ if [ "$SKIP_CHECK" = false ]; then
 
   echo ""
   echo "-- connectivity over the direct link --"
-  ping -c 3 "$PEER_IP" || true
+  ping -c 3 10.111.0.3 || true
 
   echo ""
   echo "-- internet connectivity (default gateway should be via motherboard NIC) --"
