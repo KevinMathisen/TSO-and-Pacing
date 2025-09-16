@@ -14,6 +14,7 @@ ORG_DRV_TREE="$HOME/master/org-nfp-driver"
 FW_NAME="nic_AMDA0096-0001_2x10.nffw"
 FW_DST_DIR="/lib/firmware/netronome"
 NFP_IF="enp2s0np0"
+DRV_DST_DIR="/lib/modules/$(uname -r)/updates/"
 MY_IP="10.111.0.3/24"
 PEER_IP="10.111.0.1"
 SKIP_FW=false
@@ -42,9 +43,9 @@ done
 
 # ============ BUILD FIRMWARE ================
 if [ "$SKIP_FW" = false ]; then
+  cd "$FW_TREE"
   if [ "$SKIP_BUILD" = false ]; then
     echo "== Build firmware =="
-    cd "$FW_TREE"
     if [ "$CLEAN" = true ]; then
         make clean
     fi
@@ -58,7 +59,7 @@ if [ "$SKIP_FW" = false ]; then
   cp -r "$FW_TREE/firmware/nffw"/* "$FW_DST_DIR"/
   cp "$FW_DST_DIR"/nic/* "$FW_DST_DIR"/
 
-  # Reload nfp kernel module with new firmware if we skip driver updates
+  # Reload nfp kernel module with new firmware here if we skip driver updates
   if [ "$SKIP_DRIVER" = true ]; then
     echo "== Reload driver =="
     depmod -a
@@ -73,20 +74,21 @@ fi
 
 # ============ BUILD DRIVER ==================
 if [ "$SKIP_DRIVER" = false ]; then
+  cd "$DRV_TREE"
   if [ "$SKIP_BUILD" = false ]; then
     echo "== Build driver =="
-    cd "$DRV_TREE"
-    if [ "$CLEAN" = true ]; then
-        make clean
-    fi
-    make
-    make install
+    
+    make -C /lib/modules/$(uname -r)/build M=$PWD clean
+    make -C /lib/modules/$(uname -r)/build M=$PWD modules
   fi
 
   echo "== Reload driver =="
+  # place nfp.ko in updates/ so it is used instead of host drivers
+  install -D -m 0644 ./nfp.ko "$DRV_DST_DIR/nfp.ko"
+
   depmod -a
-  rmmod nfp 2>/dev/null || true
-  modprobe nfp nfp_dev_cpp=1
+  modprobe -r nfp 2>/dev/null || true
+  modprobe -v nfp nfp_dev_cpp=1
   update-initramfs -u 2>/dev/null
 
 else
@@ -97,13 +99,17 @@ fi
 if [ "$SKIP_CHECK" = false ]; then
   echo "== Quick health checks =="
   echo ""
-  echo "-- module path/version --"
+  echo "-- nfp module path/version (should show .../updates/... if loaded custom drivers) --"
   modinfo -n nfp
   modinfo nfp | egrep -i 'version|o-o-t|filename' || true
+  echo "live nfp module srcversion: $(cat /sys/module/nfp/srcversion)"
+  echo "disk nfp module srcversion: $(modinfo -F srcversion /lib/modules/$(uname -r)/updates/nfp.ko)"
 
   echo ""
   echo "-- check firmware logs if loaded and no errors --"
-  dmesg | grep nfp | tail -n 40 || true
+  if dmesg | grep -q 'enp2s0np0 down'; then
+    dmesg | tac | sed '1,/enp2s0np0 down/!d' | tac
+  fi
 
   echo ""
   echo "-- firmware files present --"
@@ -136,4 +142,10 @@ if [ "$SKIP_CHECK" = false ]; then
 
 else
   echo "== Skipping health checks =="
+fi
+
+if [ "$SKIP_DRIVER" = false ]; then
+  echo ""
+  echo "NB: to revert to old nfp drivers, run: sudo ./revert-driver.sh"
+  echo ""
 fi
