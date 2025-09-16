@@ -30,9 +30,9 @@ for arg in "$@"; do
     --skip-check)   SKIP_CHECK=true ;;
     --skip-build)   SKIP_BUILD=true ;;
     --clean)        CLEAN=true ;;
-    --org)          FW_TREE="$ORG_FW_TREE"; DRV_TREE="$ORG_DRV_TREE" ;;
-    --org-fw)       FW_TREE="$ORG_FW_TREE" ;;
-    --org-driver)   DRV_TREE="$ORG_DRV_TREE" ;;
+    --org)          FW_TREE="$ORG_FW_TREE"; DRV_TREE="$ORG_DRV_TREE"; SKIP_BUILD=true ;;
+    --org-fw)       FW_TREE="$ORG_FW_TREE"; SKIP_BUILD=true ;;
+    --org-driver)   DRV_TREE="$ORG_DRV_TREE"; SKIP_BUILD=true ;;
     --help)         echo " usage (--help --skip-fw --skip-driver --skip-check --clean --org --org-fw --org-driver)"; exit 0 ;;
     *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --skip-build --clean --org --org-fw --org-driver)"; exit 1 ;;
   esac
@@ -107,8 +107,9 @@ if [ "$SKIP_CHECK" = false ]; then
 
   echo ""
   echo "-- check firmware logs if loaded and no errors --"
-  if dmesg | grep -q 'enp2s0np0 down'; then
-    dmesg | tac | sed '1,/enp2s0np0 down/!d' | tac
+  logs="$(dmesg)"
+  if grep -q 'enp2s0np0 down' <<< "$logs"; then
+    printf '%s\n' "$logs" | tac | sed '1,/enp2s0np0 down/!d' | tac
   fi
 
   echo ""
@@ -121,6 +122,7 @@ if [ "$SKIP_CHECK" = false ]; then
 
   echo ""
   echo "-- offloads (expect TSO on) --"
+  ethtool -K enp2s0np0 tso on gso on
   ethtool -k "$NFP_IF" | egrep 'tcp-segmentation-offload'
 
   echo ""
