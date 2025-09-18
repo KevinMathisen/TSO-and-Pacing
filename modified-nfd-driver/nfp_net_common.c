@@ -62,6 +62,8 @@
 #include "nfp_net_sriov.h"
 #include "nfp_port.h"
 
+int PACE_TSO = 1;
+
 /**
  * nfp_net_get_fw_version() - Read and parse the FW version
  * @fw_ver:	Output fw_version structure to read to
@@ -896,6 +898,15 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	if (skb_vlan_tag_present(skb) && dp->ctrl & NFP_NET_CFG_CTRL_TXVLAN) {
 		txd->flags |= PCIE_DESC_TX_VLAN;
 		txd->vlan = cpu_to_le16(skb_vlan_tag_get(skb));
+	}
+	if (PACE_TSO) {
+		/* Use vlan flag to indicate TSO pacing, as it does not seem like firmware uses the flag anywhere.
+		   Use vlan field to indicate desired pacing rate. 
+		   Only 16 bits -> more than sufficient for our purposes. 
+		   Naive first implementation could be to state desired gap in us.
+		*/
+		txd->flags |= PCIE_DESC_TX_VLAN;
+		txd->vlan = 10;
 	}
 
 	/* Gather DMA */
