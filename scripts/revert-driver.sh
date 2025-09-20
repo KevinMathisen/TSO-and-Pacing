@@ -18,6 +18,8 @@ modinfo -n nfp
 
 echo ""
 echo "-- check firmware logs if loaded and no errors --"
-if dmesg | grep -q 'enp2s0np0 down'; then
-  dmesg | tac | sed '1,/enp2s0np0 down/!d' | tac
+
+logs="$(dmesg)"
+if grep -q 'enp2s0np0 down' <<< "$logs"; then
+  printf '%s\n' "$logs" | tac | sed '1,/enp2s0np0 down/!d' | tac
 fi
