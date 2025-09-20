@@ -10,10 +10,17 @@
  *          Brad Petrus <brad.petrus@netronome.com>
  *          Chris Telfer <chris.telfer@netronome.com>
  */
+#include "nfp_net_compat.h"
 
+#if VER_NON_RHEL_GE(4, 9) || VER_RHEL_GE(7, 5)
 #include <linux/bitfield.h>
+#endif
+#if COMPAT__HAVE_XDP
 #include <linux/bpf.h>
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0)
 #include <linux/bpf_trace.h>
+#endif
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -24,8 +31,12 @@
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/mm.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
 #include <linux/overflow.h>
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0)
 #include <linux/page_ref.h>
+#endif
 #include <linux/pci.h>
 #include <linux/pci_regs.h>
 #include <linux/msi.h>
@@ -36,8 +47,12 @@
 #include <linux/vmalloc.h>
 #include <linux/ktime.h>
 
+#ifdef COMPAT__HAVE_TLS_OFFLOAD
 #include <net/tls.h>
+#endif
+#if COMPAT__HAVE_VXLAN_OFFLOAD
 #include <net/vxlan.h>
+#endif
 
 #include "nfpcore/nfp_nsp.h"
 #include "ccm.h"
@@ -47,8 +62,6 @@
 #include "nfp_net_sriov.h"
 #include "nfp_port.h"
 #include "crypto/crypto.h"
-
-int PACE_TSO = 1;
 
 /**
  * nfp_net_get_fw_version() - Read and parse the FW version
@@ -74,9 +87,11 @@ static dma_addr_t nfp_net_dma_map_rx(struct nfp_net_dp *dp, void *frag)
 static void
 nfp_net_dma_sync_dev_rx(const struct nfp_net_dp *dp, dma_addr_t dma_addr)
 {
+#if COMPAT__USE_DMA_SKIP_SYNC
 	dma_sync_single_for_device(dp->dev, dma_addr,
 				   dp->fl_bufsz - NFP_NET_RX_BUF_NON_DATA,
 				   dp->rx_dma_dir);
+#endif
 }
 
 static void nfp_net_dma_unmap_rx(struct nfp_net_dp *dp, dma_addr_t dma_addr)
@@ -89,8 +104,13 @@ static void nfp_net_dma_unmap_rx(struct nfp_net_dp *dp, dma_addr_t dma_addr)
 static void nfp_net_dma_sync_cpu_rx(struct nfp_net_dp *dp, dma_addr_t dma_addr,
 				    unsigned int len)
 {
+#if COMPAT__USE_DMA_SKIP_SYNC
 	dma_sync_single_for_cpu(dp->dev, dma_addr - NFP_NET_RX_BUF_HEADROOM,
 				len, dp->rx_dma_dir);
+#else
+	dma_sync_single_for_cpu(dp->dev, dma_addr - NFP_NET_RX_BUF_HEADROOM,
+				dp->xdp_prog ? len : 64, dp->rx_dma_dir);
+#endif
 }
 
 /* Firmware reconfig
@@ -175,7 +195,11 @@ static int nfp_net_reconfig_wait(struct nfp_net *nn, unsigned long deadline)
 	return 0;
 }
 
+#if VER_NON_RHEL_LT(4, 14) || VER_RHEL_LT(7, 6)
+static void nfp_net_reconfig_timer(unsigned long t)
+#else
 static void nfp_net_reconfig_timer(struct timer_list *t)
+#endif
 {
 	struct nfp_net *nn = from_timer(nn, t, reconfig_timer);
 
@@ -828,7 +852,7 @@ static struct sk_buff *
 nfp_net_tls_tx(struct nfp_net_dp *dp, struct nfp_net_r_vector *r_vec,
 	       struct sk_buff *skb, u64 *tls_handle, int *nr_frags)
 {
-#ifdef CONFIG_TLS_DEVICE
+#ifdef COMPAT__HAVE_TLS_OFFLOAD
 	struct nfp_net_tls_offload_ctx *ntls;
 	struct sk_buff *nskb;
 	bool resync_pending;
@@ -897,7 +921,7 @@ nfp_net_tls_tx(struct nfp_net_dp *dp, struct nfp_net_r_vector *r_vec,
 
 static void nfp_net_tls_tx_undo(struct sk_buff *skb, u64 tls_handle)
 {
-#ifdef CONFIG_TLS_DEVICE
+#ifdef COMPAT__HAVE_TLS_OFFLOAD
 	struct nfp_net_tls_offload_ctx *ntls;
 	u32 datalen, seq;
 
@@ -924,6 +948,7 @@ static void nfp_net_tx_xmit_more_flush(struct nfp_net_tx_ring *tx_ring)
 	tx_ring->wr_ptr_add = 0;
 }
 
+#ifdef COMPAT__HAVE_METADATA_IP_TUNNEL
 static int nfp_net_prep_tx_meta(struct sk_buff *skb, u64 tls_handle)
 {
 	struct metadata_dst *md_dst = skb_metadata_dst(skb);
@@ -966,6 +991,12 @@ static int nfp_net_prep_tx_meta(struct sk_buff *skb, u64 tls_handle)
 
 	return md_bytes;
 }
+#else
+static int nfp_net_prep_tx_meta(struct sk_buff *skb, u64 tls_handle)
+{
+	return 0;
+}
+#endif
 
 /**
  * nfp_net_tx() - Main transmit entry point
@@ -1019,6 +1050,9 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	if (unlikely(md_bytes < 0))
 		goto err_flush;
 
+	if (unlikely(compat_ndo_features_check(nn, skb)))
+		goto err_flush;
+
 	/* Start with the head skbuf */
 	dma_addr = dma_map_single(dp->dev, skb->data, skb_headlen(skb),
 				  DMA_TO_DEVICE);
@@ -1052,15 +1086,6 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	if (skb_vlan_tag_present(skb) && dp->ctrl & NFP_NET_CFG_CTRL_TXVLAN) {
 		txd->flags |= PCIE_DESC_TX_VLAN;
 		txd->vlan = cpu_to_le16(skb_vlan_tag_get(skb));
-	}
-	if (PACE_TSO) {
-		/* Use vlan flag to indicate TSO pacing, as it does not seem like firmware uses the flag anywhere.
-		   Use vlan field to indicate desired pacing rate. 
-		   Only 16 bits -> more than sufficient for our purposes. 
-		   Naive first implementation could be to state desired gap in us.
-		*/
-		txd->flags |= PCIE_DESC_TX_VLAN;
-		txd->vlan = 10;
 	}
 
 	/* Gather DMA */
@@ -1106,7 +1131,7 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 		nfp_net_tx_ring_stop(nd_q, tx_ring);
 
 	tx_ring->wr_ptr_add += nr_frags + 1;
-	if (__netdev_tx_sent_queue(nd_q, txbuf->real_len, netdev_xmit_more()))
+	if (__netdev_tx_sent_queue(nd_q, txbuf->real_len, skb_xmit_more(skb)))
 		nfp_net_tx_xmit_more_flush(tx_ring);
 
 	return NETDEV_TX_OK;
@@ -1628,7 +1653,7 @@ static void nfp_net_rx_csum(struct nfp_net_dp *dp,
 	 */
 	if (rxd->rxd.flags & PCIE_DESC_RX_TCP_CSUM_OK ||
 	    rxd->rxd.flags & PCIE_DESC_RX_UDP_CSUM_OK) {
-		__skb_incr_checksum_unnecessary(skb);
+		compat_incr_checksum_unnecessary(skb, false);
 		u64_stats_update_begin(&r_vec->rx_sync);
 		r_vec->hw_csum_rx_ok++;
 		u64_stats_update_end(&r_vec->rx_sync);
@@ -1636,7 +1661,7 @@ static void nfp_net_rx_csum(struct nfp_net_dp *dp,
 
 	if (rxd->rxd.flags & PCIE_DESC_RX_I_TCP_CSUM_OK ||
 	    rxd->rxd.flags & PCIE_DESC_RX_I_UDP_CSUM_OK) {
-		__skb_incr_checksum_unnecessary(skb);
+		compat_incr_checksum_unnecessary(skb, true);
 		u64_stats_update_begin(&r_vec->rx_sync);
 		r_vec->hw_csum_rx_inner_ok++;
 		u64_stats_update_end(&r_vec->rx_sync);
@@ -1744,6 +1769,7 @@ nfp_net_rx_drop(const struct nfp_net_dp *dp, struct nfp_net_r_vector *r_vec,
 		dev_kfree_skb_any(skb);
 }
 
+#if COMPAT__HAVE_XDP
 static bool
 nfp_net_tx_xdp_buf(struct nfp_net_dp *dp, struct nfp_net_rx_ring *rx_ring,
 		   struct nfp_net_tx_ring *tx_ring,
@@ -1798,6 +1824,7 @@ nfp_net_tx_xdp_buf(struct nfp_net_dp *dp, struct nfp_net_rx_ring *rx_ring,
 	tx_ring->wr_ptr_add++;
 	return true;
 }
+#endif
 
 /**
  * nfp_net_rx() - receive up to @budget packets on @rx_ring
@@ -1820,13 +1847,17 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 	unsigned int true_bufsz;
 	struct sk_buff *skb;
 	int pkts_polled = 0;
+#if COMPAT__HAVE_XDP
 	struct xdp_buff xdp;
+#endif
 	int idx;
 
 	rcu_read_lock();
 	xdp_prog = READ_ONCE(dp->xdp_prog);
 	true_bufsz = xdp_prog ? PAGE_SIZE : dp->fl_bufsz;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
 	xdp.rxq = &rx_ring->xdp_rxq;
+#endif
 	tx_ring = r_vec->xdp_ring;
 
 	while (pkts_polled < budget) {
@@ -1914,14 +1945,19 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 			}
 		}
 
+#if COMPAT__HAVE_XDP
 		if (xdp_prog && !meta.portid) {
 			void *orig_data = rxbuf->frag + pkt_off;
 			unsigned int dma_off;
 			int act;
 
+#if COMPAT__HAVE_XDP_ADJUST_HEAD
 			xdp.data_hard_start = rxbuf->frag + NFP_NET_RX_BUF_HEADROOM;
+#endif
 			xdp.data = orig_data;
+#if COMPAT__HAVE_XDP_METADATA
 			xdp.data_meta = orig_data;
+#endif
 			xdp.data_end = orig_data + pkt_len;
 
 			act = bpf_prog_run_xdp(xdp_prog, &xdp);
@@ -1931,7 +1967,9 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 
 			switch (act) {
 			case XDP_PASS:
+#if COMPAT__HAVE_XDP_METADATA
 				meta_len_xdp = xdp.data - xdp.data_meta;
+#endif
 				break;
 			case XDP_TX:
 				dma_off = pkt_off - NFP_NET_RX_BUF_HEADROOM;
@@ -1955,6 +1993,9 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 				continue;
 			}
 		}
+#else
+		xdp_tx_cmpl = xdp_tx_cmpl;
+#endif
 
 		if (likely(!meta.portid)) {
 			netdev = dp->netdev;
@@ -2008,7 +2049,7 @@ static int nfp_net_rx(struct nfp_net_rx_ring *rx_ring, int budget)
 
 		nfp_net_rx_csum(dp, r_vec, rxd, &meta, skb);
 
-#ifdef CONFIG_TLS_DEVICE
+#ifdef COMPAT__HAVE_TLS_OFFLOAD
 		if (rxd->rxd.flags & PCIE_DESC_RX_DECRYPTED) {
 			skb->decrypted = true;
 			u64_stats_update_begin(&r_vec->rx_sync);
@@ -2071,6 +2112,7 @@ static int nfp_net_poll(struct napi_struct *napi, int budget)
 	return pkts_polled;
 }
 
+#ifdef CONFIG_NFP_NET_PF
 /* Control device data path
  */
 
@@ -2291,9 +2333,11 @@ static bool nfp_ctrl_rx(struct nfp_net_r_vector *r_vec)
 
 	return budget;
 }
+#endif /* CONFIG_NFP_NET_PF */
 
 static void nfp_ctrl_poll(unsigned long arg)
 {
+#ifdef CONFIG_NFP_NET_PF
 	struct nfp_net_r_vector *r_vec = (void *)arg;
 
 	spin_lock(&r_vec->lock);
@@ -2308,6 +2352,7 @@ static void nfp_ctrl_poll(unsigned long arg)
 		nn_dp_warn(&r_vec->nfp_net->dp,
 			   "control message budget exceeded!\n");
 	}
+#endif
 }
 
 /* Setup and Configuration
@@ -2388,9 +2433,9 @@ nfp_net_tx_ring_alloc(struct nfp_net_dp *dp, struct nfp_net_tx_ring *tx_ring)
 	tx_ring->cnt = dp->txd_cnt;
 
 	tx_ring->size = array_size(tx_ring->cnt, sizeof(*tx_ring->txds));
-	tx_ring->txds = dma_alloc_coherent(dp->dev, tx_ring->size,
-					   &tx_ring->dma,
-					   GFP_KERNEL | __GFP_NOWARN);
+	tx_ring->txds = dma_zalloc_coherent(dp->dev, tx_ring->size,
+					    &tx_ring->dma,
+					    GFP_KERNEL | __GFP_NOWARN);
 	if (!tx_ring->txds) {
 		netdev_warn(dp->netdev, "failed to allocate TX descriptor ring memory, requested descriptor count: %d, consider lowering descriptor count\n",
 			    tx_ring->cnt);
@@ -2546,9 +2591,9 @@ nfp_net_rx_ring_alloc(struct nfp_net_dp *dp, struct nfp_net_rx_ring *rx_ring)
 
 	rx_ring->cnt = dp->rxd_cnt;
 	rx_ring->size = array_size(rx_ring->cnt, sizeof(*rx_ring->rxds));
-	rx_ring->rxds = dma_alloc_coherent(dp->dev, rx_ring->size,
-					   &rx_ring->dma,
-					   GFP_KERNEL | __GFP_NOWARN);
+	rx_ring->rxds = dma_zalloc_coherent(dp->dev, rx_ring->size,
+					    &rx_ring->dma,
+					    GFP_KERNEL | __GFP_NOWARN);
 	if (!rx_ring->rxds) {
 		netdev_warn(dp->netdev, "failed to allocate RX descriptor ring memory, requested descriptor count: %d, consider lowering descriptor count\n",
 			    rx_ring->cnt);
@@ -2872,6 +2917,7 @@ static int nfp_net_set_config_and_enable(struct nfp_net *nn)
 	for (r = 0; r < nn->dp.num_rx_rings; r++)
 		nfp_net_rx_ring_fill_freelist(&nn->dp, &nn->dp.rx_rings[r]);
 
+#if COMPAT__HAVE_VXLAN_OFFLOAD
 	/* Since reconfiguration requests while NFP is down are ignored we
 	 * have to wipe the entire VXLAN configuration and reinitialize it.
 	 */
@@ -2880,6 +2926,7 @@ static int nfp_net_set_config_and_enable(struct nfp_net *nn)
 		memset(&nn->vxlan_usecnt, 0, sizeof(nn->vxlan_usecnt));
 		udp_tunnel_get_rx_info(nn->dp.netdev);
 	}
+#endif
 
 	return 0;
 }
@@ -3314,6 +3361,11 @@ static int nfp_net_change_mtu(struct net_device *netdev, int new_mtu)
 	struct nfp_net_dp *dp;
 	int err;
 
+	if (new_mtu < 68 || new_mtu > nn->max_mtu) {
+		nn_err(nn, "New MTU (%d) is not valid\n", new_mtu);
+		return -EINVAL;
+	}
+
 	err = nfp_app_check_mtu(nn->app, netdev, new_mtu);
 	if (err)
 		return err;
@@ -3328,7 +3380,11 @@ static int nfp_net_change_mtu(struct net_device *netdev, int new_mtu)
 }
 
 static int
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+nfp_net_vlan_rx_add_vid(struct net_device *netdev, u16 vid)
+#else
 nfp_net_vlan_rx_add_vid(struct net_device *netdev, __be16 proto, u16 vid)
+#endif
 {
 	const u32 cmd = NFP_NET_CFG_MBOX_CMD_CTAG_FILTER_ADD;
 	struct nfp_net *nn = netdev_priv(netdev);
@@ -3352,7 +3408,11 @@ nfp_net_vlan_rx_add_vid(struct net_device *netdev, __be16 proto, u16 vid)
 }
 
 static int
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 10, 0)
+nfp_net_vlan_rx_kill_vid(struct net_device *netdev, u16 vid)
+#else
 nfp_net_vlan_rx_kill_vid(struct net_device *netdev, __be16 proto, u16 vid)
+#endif
 {
 	const u32 cmd = NFP_NET_CFG_MBOX_CMD_CTAG_FILTER_KILL;
 	struct nfp_net *nn = netdev_priv(netdev);
@@ -3375,8 +3435,23 @@ nfp_net_vlan_rx_kill_vid(struct net_device *netdev, __be16 proto, u16 vid)
 	return nfp_net_mbox_reconfig_and_unlock(nn, cmd);
 }
 
-static void nfp_net_stat64(struct net_device *netdev,
-			   struct rtnl_link_stats64 *stats)
+#if COMPAT__NEED_NDO_POLL_CONTROLLER
+static void nfp_net_netpoll(struct net_device *netdev)
+{
+	struct nfp_net *nn = netdev_priv(netdev);
+	int i;
+
+	/* nfp_net's NAPIs are statically allocated so even if there is a race
+	 * with reconfig path this will simply try to schedule some disabled
+	 * NAPI instances.
+	 */
+	for (i = 0; i < nn->dp.num_stack_tx_rings; i++)
+		napi_schedule_irqoff(&nn->r_vecs[i].napi);
+}
+#endif
+
+static compat__stat64_ret_t nfp_net_stat64(struct net_device *netdev,
+					   struct rtnl_link_stats64 *stats)
 {
 	struct nfp_net *nn = netdev_priv(netdev);
 	int r;
@@ -3415,6 +3490,10 @@ static void nfp_net_stat64(struct net_device *netdev,
 
 	stats->tx_dropped += nn_readq(nn, NFP_NET_CFG_STATS_TX_DISCARDS);
 	stats->tx_errors += nn_readq(nn, NFP_NET_CFG_STATS_TX_ERRORS);
+
+#if VER_NON_RHEL_LT(4, 11) || VER_RHEL_LT(7, 5)
+	return stats;
+#endif
 }
 
 static int nfp_net_set_features(struct net_device *netdev,
@@ -3500,6 +3579,7 @@ static int nfp_net_set_features(struct net_device *netdev,
 	return 0;
 }
 
+#if COMPAT__HAVE_NDO_FEATURES_CHECK
 static netdev_features_t
 nfp_net_features_check(struct sk_buff *skb, struct net_device *dev,
 		       netdev_features_t features)
@@ -3548,7 +3628,9 @@ nfp_net_features_check(struct sk_buff *skb, struct net_device *dev,
 
 	return features;
 }
+#endif
 
+#if VER_NON_RHEL_GE(4, 1) || VER_RHEL_GE(7, 4)
 static int
 nfp_net_get_phys_port_name(struct net_device *netdev, char *name, size_t len)
 {
@@ -3559,7 +3641,11 @@ nfp_net_get_phys_port_name(struct net_device *netdev, char *name, size_t len)
 	 * is taking care of name formatting.
 	 */
 	if (nn->port)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
 		return -EOPNOTSUPP;
+#else
+		return nfp_port_get_phys_port_name(netdev, name, len);
+#endif
 
 	if (nn->dp.is_vf || nn->vnic_no_name)
 		return -EOPNOTSUPP;
@@ -3570,7 +3656,9 @@ nfp_net_get_phys_port_name(struct net_device *netdev, char *name, size_t len)
 
 	return 0;
 }
+#endif
 
+#if COMPAT__HAVE_VXLAN_OFFLOAD
 /**
  * nfp_net_set_vxlan_port() - set vxlan port in SW and reconfigure HW
  * @nn:   NFP Net device to reconfigure
@@ -3619,8 +3707,15 @@ static int nfp_net_find_vxlan_idx(struct nfp_net *nn, __be16 port)
 }
 
 static void nfp_net_add_vxlan_port(struct net_device *netdev,
+#if COMPAT__HAVE_UDP_OFFLOAD
 				   struct udp_tunnel_info *ti)
 {
+#else
+				   sa_family_t sa_family, __be16 port)
+{
+	struct udp_tunnel_info __ti = { UDP_TUNNEL_TYPE_VXLAN, port };
+	struct udp_tunnel_info *ti = &__ti;
+#endif
 	struct nfp_net *nn = netdev_priv(netdev);
 	int idx;
 
@@ -3636,8 +3731,15 @@ static void nfp_net_add_vxlan_port(struct net_device *netdev,
 }
 
 static void nfp_net_del_vxlan_port(struct net_device *netdev,
+#if COMPAT__HAVE_UDP_OFFLOAD
 				   struct udp_tunnel_info *ti)
 {
+#else
+				   sa_family_t sa_family, __be16 port)
+{
+	struct udp_tunnel_info __ti = { UDP_TUNNEL_TYPE_VXLAN, port };
+	struct udp_tunnel_info *ti = &__ti;
+#endif
 	struct nfp_net *nn = netdev_priv(netdev);
 	int idx;
 
@@ -3651,8 +3753,14 @@ static void nfp_net_del_vxlan_port(struct net_device *netdev,
 	if (!--nn->vxlan_usecnt[idx])
 		nfp_net_set_vxlan_port(nn, idx, 0);
 }
+#endif /* COMPAT__HAVE_VXLAN_OFFLOAD */
 
+#if COMPAT__HAVE_XDP
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
+static int nfp_net_xdp_setup_drv(struct nfp_net *nn, struct netdev_xdp *bpf)
+#else
 static int nfp_net_xdp_setup_drv(struct nfp_net *nn, struct netdev_bpf *bpf)
+#endif
 {
 	struct bpf_prog *prog = bpf->prog;
 	struct nfp_net_dp *dp;
@@ -3677,7 +3785,7 @@ static int nfp_net_xdp_setup_drv(struct nfp_net *nn, struct netdev_bpf *bpf)
 	dp->rx_dma_off = prog ? XDP_PACKET_HEADROOM - nn->dp.rx_offset : 0;
 
 	/* We need RX reconfig to remap the buffers (BIDIR vs FROM_DEV) */
-	err = nfp_net_ring_reconfig(nn, dp, bpf->extack);
+	err = nfp_net_ring_reconfig(nn, dp, compat__xdp_extact(bpf));
 	if (err)
 		return err;
 
@@ -3685,6 +3793,7 @@ static int nfp_net_xdp_setup_drv(struct nfp_net *nn, struct netdev_bpf *bpf)
 	return 0;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
 static int nfp_net_xdp_setup_hw(struct nfp_net *nn, struct netdev_bpf *bpf)
 {
 	int err;
@@ -3699,24 +3808,41 @@ static int nfp_net_xdp_setup_hw(struct nfp_net *nn, struct netdev_bpf *bpf)
 	xdp_attachment_setup(&nn->xdp_hw, bpf);
 	return 0;
 }
+#endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
+static int nfp_net_xdp(struct net_device *netdev, struct netdev_xdp *xdp)
+#else
 static int nfp_net_xdp(struct net_device *netdev, struct netdev_bpf *xdp)
+#endif
 {
 	struct nfp_net *nn = netdev_priv(netdev);
 
 	switch (xdp->command) {
 	case XDP_SETUP_PROG:
 		return nfp_net_xdp_setup_drv(nn, xdp);
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
 	case XDP_SETUP_PROG_HW:
 		return nfp_net_xdp_setup_hw(nn, xdp);
+#endif
 	case XDP_QUERY_PROG:
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
+		if (nn->xdp.prog)
+			return xdp_attachment_query(&nn->xdp, xdp);
+#else
 		return xdp_attachment_query(&nn->xdp, xdp);
 	case XDP_QUERY_PROG_HW:
+#endif
 		return xdp_attachment_query(&nn->xdp_hw, xdp);
 	default:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 16, 0)
 		return nfp_app_bpf(nn->app, nn, xdp);
+#else
+		return -EINVAL;
+#endif
 	}
 }
+#endif
 
 static int nfp_net_set_mac_address(struct net_device *netdev, void *addr)
 {
@@ -3748,24 +3874,77 @@ const struct net_device_ops nfp_net_netdev_ops = {
 	.ndo_get_stats64	= nfp_net_stat64,
 	.ndo_vlan_rx_add_vid	= nfp_net_vlan_rx_add_vid,
 	.ndo_vlan_rx_kill_vid	= nfp_net_vlan_rx_kill_vid,
+#if COMPAT__NEED_NDO_POLL_CONTROLLER
+	.ndo_poll_controller	= nfp_net_netpoll,
+#endif
 	.ndo_set_vf_mac         = nfp_app_set_vf_mac,
+#if VER_IS_NON_RHEL || VER_RHEL_LT(7, 4) || VER_RHEL_GE(8, 0)
 	.ndo_set_vf_vlan        = nfp_app_set_vf_vlan,
+#endif
 	.ndo_set_vf_spoofchk    = nfp_app_set_vf_spoofchk,
+#if VER_NON_RHEL_GE(4, 4) || VER_RHEL_GE(8, 0)
 	.ndo_set_vf_trust	= nfp_app_set_vf_trust,
+#endif
 	.ndo_get_vf_config	= nfp_app_get_vf_config,
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)
 	.ndo_set_vf_link_state  = nfp_app_set_vf_link_state,
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 13, 0)
 	.ndo_setup_tc		= nfp_port_setup_tc,
+#endif
 	.ndo_tx_timeout		= nfp_net_tx_timeout,
 	.ndo_set_rx_mode	= nfp_net_set_rx_mode,
+#if VER_IS_NON_RHEL || VER_RHEL_LT(7, 5) || VER_RHEL_GE(8, 0)
 	.ndo_change_mtu		= nfp_net_change_mtu,
+#elif VER_RHEL_GE(7, 5)
+	.ndo_change_mtu_rh74	= nfp_net_change_mtu,
+#endif
 	.ndo_set_mac_address	= nfp_net_set_mac_address,
 	.ndo_set_features	= nfp_net_set_features,
+#if COMPAT__HAVE_NDO_FEATURES_CHECK
 	.ndo_features_check	= nfp_net_features_check,
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0)
 	.ndo_get_phys_port_name	= nfp_net_get_phys_port_name,
+#endif
+#if (VER_IS_NON_RHEL || VER_RHEL_GE(8, 0)) && COMPAT__HAVE_UDP_OFFLOAD
 	.ndo_udp_tunnel_add	= nfp_net_add_vxlan_port,
 	.ndo_udp_tunnel_del	= nfp_net_del_vxlan_port,
+#elif VER_IS_NON_RHEL && COMPAT__HAVE_VXLAN_OFFLOAD
+	.ndo_add_vxlan_port     = nfp_net_add_vxlan_port,
+	.ndo_del_vxlan_port     = nfp_net_del_vxlan_port,
+#endif
+#if COMPAT__HAVE_XDP
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0)
 	.ndo_bpf		= nfp_net_xdp,
+#else
+	.ndo_xdp		= nfp_net_xdp,
+#endif
+#if LINUX_VERSION_CODE == KERNEL_VERSION(5, 1, 0)
+	.ndo_get_port_parent_id	= nfp_port_get_port_parent_id,
+#endif
+#ifdef CONFIG_NFP_NET_PF
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 1, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
+	.ndo_get_devlink	= nfp_devlink_get_devlink,
+#else
 	.ndo_get_devlink_port	= nfp_devlink_get_devlink_port,
+#endif
+#endif
+#endif
+#endif
+#if VER_RHEL_GE(7, 3) && VER_RHEL_LT(8, 0)
+	.ndo_size		= sizeof(nfp_net_netdev_ops),
+	.extended		= {
+		.ndo_set_vf_trust	= nfp_app_set_vf_trust,
+#if VER_RHEL_GE(7, 4)
+		.ndo_set_vf_vlan	= nfp_app_set_vf_vlan,
+		.ndo_get_phys_port_name	= nfp_net_get_phys_port_name,
+		.ndo_udp_tunnel_add	= nfp_net_add_vxlan_port,
+		.ndo_udp_tunnel_del	= nfp_net_del_vxlan_port,
+#endif
+	},
+#endif
 };
 
 /**
@@ -3898,6 +4077,10 @@ err_free_nn:
 void nfp_net_free(struct nfp_net *nn)
 {
 	WARN_ON(timer_pending(&nn->reconfig_timer) || nn->reconfig_posted);
+#if COMPAT__HAVE_XDP && LINUX_VERSION_CODE < KERNEL_VERSION(4, 16, 0)
+	if (nn->xdp.prog)
+		bpf_prog_put(nn->xdp.prog);
+#endif
 	nfp_ccm_mbox_free(nn);
 
 	if (nn->dp.netdev)
@@ -4057,9 +4240,14 @@ static void nfp_net_netdev_init(struct nfp_net *nn)
 	netdev->netdev_ops = &nfp_net_netdev_ops;
 	netdev->watchdog_timeo = msecs_to_jiffies(5 * 1000);
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 1, 0)
+	SWITCHDEV_SET_OPS(netdev, &nfp_port_switchdev_ops);
+#endif
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
 	/* MTU range: 68 - hw-specific max */
 	netdev->min_mtu = ETH_MIN_MTU;
 	netdev->max_mtu = nn->max_mtu;
+#endif
 
 	netdev->gso_max_segs = NFP_NET_LSO_MAX_SEGS;
 
