@@ -1100,14 +1100,6 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 		txd->flags |= PCIE_DESC_TX_VLAN;
 		txd->vlan = cpu_to_le16(skb_vlan_tag_get(skb));
 	}
-	if (PACE_TSO) {
-		/* Use tso flag to indicate TSO pacing, as if tso is used we also want pacing.
-		   Use vlan/offset field to indicate desired pacing rate. 
-		   Only 16 bits -> more than sufficient for our purposes. 
-		   Naive first implementation could be to state desired gap in us.
-		*/
-		txd->vlan = 10;
-	}
 
 	/* Gather DMA */
 	if (nr_frags > 0) {
