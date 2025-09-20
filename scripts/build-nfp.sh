@@ -72,6 +72,9 @@ fi
 
 # ============ BUILD DRIVER ==================
 if [ "$SKIP_DRIVER" = false ]; then
+  echo ""
+  echo "============================"
+  echo ""
   cd "$DRV_TREE"
   if [ "$SKIP_BUILD" = false ]; then
     echo "== Build driver =="
@@ -96,6 +99,9 @@ fi
 
 # ============ HEALTH CHECKS ==================
 if [ "$SKIP_CHECK" = false ]; then
+  echo ""
+  echo "============================"
+  echo ""
   echo "== Quick health checks =="
   echo ""
   echo "-- nfp module path/version (should show .../extra/... if loaded custom drivers, and dev_cpp enabled) --"
