@@ -1158,7 +1158,7 @@ do {                                                                         \
            issued-descriptors in batch have been processed*/                 \
         pace_pre_queue_push(&pace_packet_pre_queue, &pace_pkt_desc_batch.pkt##_pkt##);  \
     } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
-        /* else LSO packets */                                               \   
+        /* else LSO packets */                                               \
         __gpr struct nfd_in_lso_desc lso_pkt;                                \
         SIGNAL_PAIR lso_sig_pair;                                            \
         SIGNAL_MASK lso_wait_msk;                                            \
