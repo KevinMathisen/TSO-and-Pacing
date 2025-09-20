@@ -774,8 +774,21 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 	txbuf->real_len += hdrlen * (txbuf->pkt_cnt - 1);
 
 	mss = skb_shinfo(skb)->gso_size & PCIE_DESC_TX_MSS_MASK;
+	/*
 	txd->l3_offset = l3_offset - md_bytes;
 	txd->l4_offset = l4_offset - md_bytes;
+	
+	Instead of setting the offset, we use the whole field (vlan/l3+l4_offset) to set the pacing rate
+
+	Potential problem, could cause corruption in packets as if read as offset this is invalid offset
+
+	Use tso flag to indicate TSO pacing, as if tso is used we also want pacing.
+
+	Only 16 bits -> more than sufficient for our purposes. 
+		Naive first implementation could be to state desired gap in us.
+	*/
+	txd->vlan = 10;
+
 	txd->lso_hdrlen = hdrlen - md_bytes;
 	txd->mss = cpu_to_le16(mss);
 	txd->flags |= PCIE_DESC_TX_LSO;
@@ -1086,6 +1099,14 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	if (skb_vlan_tag_present(skb) && dp->ctrl & NFP_NET_CFG_CTRL_TXVLAN) {
 		txd->flags |= PCIE_DESC_TX_VLAN;
 		txd->vlan = cpu_to_le16(skb_vlan_tag_get(skb));
+	}
+	if (PACE_TSO) {
+		/* Use tso flag to indicate TSO pacing, as if tso is used we also want pacing.
+		   Use vlan/offset field to indicate desired pacing rate. 
+		   Only 16 bits -> more than sufficient for our purposes. 
+		   Naive first implementation could be to state desired gap in us.
+		*/
+		txd->vlan = 10;
 	}
 
 	/* Gather DMA */
