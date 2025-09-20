@@ -8,9 +8,9 @@ if (( EUID != 0 )); then
 fi
 
 FW_TREE="$HOME/master/modified-nfp-firmware"
-DRV_TREE="$HOME/master/modified-nfp-driver"
+DRV_TREE="$HOME/master/modified-nfp-oot-driver-2019"
 ORG_FW_TREE="$HOME/master/org-nfp-firmware"
-ORG_DRV_TREE="$HOME/master/org-nfp-driver"
+ORG_DRV_TREE="$HOME/master/nfp-oot-driver-2019"
 FW_NAME="nic_AMDA0096-0001_2x10.nffw"
 FW_DST_DIR="/lib/firmware/netronome"
 NFP_IF="enp2s0np0"
@@ -61,7 +61,7 @@ if [ "$SKIP_FW" = false ]; then
   if [ "$SKIP_DRIVER" = true ]; then
     echo "== Reload driver =="
     depmod -a
-    rmmod nfp 2>/dev/null || true
+    modprobe -r nfp 2>/dev/null || true
     modprobe nfp nfp_dev_cpp=1
   fi
   update-initramfs -u 2>/dev/null
@@ -75,18 +75,19 @@ if [ "$SKIP_DRIVER" = false ]; then
   cd "$DRV_TREE"
   if [ "$SKIP_BUILD" = false ]; then
     echo "== Build driver =="
-    
-    make -C /lib/modules/$(uname -r)/build M=$PWD clean
-    make -C /lib/modules/$(uname -r)/build M=$PWD modules
+    if [ "$CLEAN" = true ]; then
+        make clean
+    fi
+    make nfp_dev_cpp=1
   fi
 
-  echo "== Reload driver =="
-  # place nfp.ko in updates/ so it is used instead of host drivers
-  install -D -m 0644 ./nfp.ko "$DRV_DST_DIR/nfp.ko"
+  echo "== Install driver =="
+  sudo make nfp_dev_cpp=1 install
 
+  echo "== Reload driver =="
   depmod -a
   modprobe -r nfp 2>/dev/null || true
-  modprobe -v nfp nfp_dev_cpp=1
+  modprobe nfp nfp_dev_cpp=1
   update-initramfs -u 2>/dev/null
 
 else
@@ -97,11 +98,12 @@ fi
 if [ "$SKIP_CHECK" = false ]; then
   echo "== Quick health checks =="
   echo ""
-  echo "-- nfp module path/version (should show .../updates/... if loaded custom drivers) --"
+  echo "-- nfp module path/version (should show .../extra/... if loaded custom drivers, and dev_cpp enabled) --"
   modinfo -n nfp
-  modinfo nfp | egrep -i 'version|o-o-t|filename' || true
+  modinfo nfp | egrep -i 'version|o-o-t|filename|cpp' || true
+  ls /dev | grep cpp
   echo "live nfp module srcversion: $(cat /sys/module/nfp/srcversion)"
-  echo "disk nfp module srcversion: $(modinfo -F srcversion /lib/modules/$(uname -r)/updates/nfp.ko)"
+  echo "disk nfp module srcversion: $(modinfo -F srcversion "$DRV_TREE/src/nfp.ko")"
 
   echo ""
   echo "-- check firmware logs if loaded and no errors --"
@@ -132,12 +134,8 @@ if [ "$SKIP_CHECK" = false ]; then
   ping -c 3 10.111.0.3 || true
 
   echo ""
-  echo "-- internet connectivity (default gateway should be via motherboard NIC) --"
-  ping -c 3 8.8.8.8 || true
-
-  echo ""
   echo "-- active qdisc on interface (should be cake with bandwidth 1Gbit and no-split-gso)"
-  sudo tc qdisc replace dev enp2s0np0 root cake bandwidth 1gbit besteffort flows no-split-gso
+  tc qdisc replace dev enp2s0np0 root cake bandwidth 1gbit besteffort flows no-split-gso
   tc qdisc show dev "$NFP_IF"
 
 else

@@ -7,16 +7,13 @@ if (( EUID != 0 )); then
   exit 1
 fi
 
-VER=$(uname -r)
-DRV_MOD_DIR="/lib/modules/$VER/updates/drivers/net/ethernet/netronome/nfp"
-
-rm -f /lib/modules/$(uname -r)/updates/nfp.ko
+rm -f /lib/modules/$(uname -r)/extra/nfp.ko
 depmod -a
 modprobe -r nfp 2>/dev/null || true
 modprobe -v nfp
 
 echo ""
-echo "-- nfp module path/version (should NOT show .../updates/...) --"
+echo "-- nfp module path/version (should NOT show .../extra/...) --"
 modinfo -n nfp
 
 echo ""
