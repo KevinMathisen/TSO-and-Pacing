@@ -1165,6 +1165,8 @@ do {                                                                         \
         __shared __gpr unsigned int jumbo_compl_seq;                         \
         int seqn_chk;                                                        \
                                                                              \
+        unsigned short vlan = batch_in.pkt##_pkt##.vlan;                     \
+        DEBUG(0xdddd, (unsigned int)vlan, 0xeeee, 0xeeee);                   \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
         /* XXX __signals(&lso_sig_pair.even) lists both even and odd */      \
