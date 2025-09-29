@@ -485,7 +485,8 @@ do {                                                                         \
                                                                                 Check if pacing flag set in issued desc. 
                                                                                 If so, store current time and pacing rate. 
                                                                                     convert pacing rate from 16 bit to 32bit?
-                                                                                Also, if we have pacing rate in vlan field, might need to zero it (to prevent further down in pipeline to be confused)    
+                                                                                Also, if we have pacing rate in vlan field, we should zero it (to prevent further down in pipeline to be confused)
+                                                                                This zero should also be applied to TSO descriptors, as these have the same vlan value    
                                                                                     */ \
         __gpr struct nfd_in_lso_desc lso_pkt;                                \
         SIGNAL_PAIR lso_sig_pair;                                            \
