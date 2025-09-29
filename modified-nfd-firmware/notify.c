@@ -107,6 +107,28 @@ static unsigned int next_ctx;
 
 __xwrite struct _pkt_desc_batch batch_out;
 
+/* -------------------- k_pace: Debug ------------------------------------------- */
+__export __emem uint32_t wire_debug[1024*1024];
+
+__shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
+
+/* 
+ * Write a 32-bit words to EMEM for debugging, without swapping contexts. 
+ * Its contents can be read using "nfp-rtsym _wire_debug"
+*/
+#define DEBUG(_a) do { \
+    if (1 && (debug_index < (10))) { \
+        __xwrite unsigned int send_data; \
+        SIGNAL debug_sig;    \
+        send_data = _a;
+        __mem_write32(&send_data, wire_debug + debug_index, sizeof(send_data), sizeof(send_data), sig_done, &debug_sig); \
+        while (!signal_test(&debug_sig));  \
+        debug_index += 1; \
+    }                           \
+ } while(0)
+
+/* --------------------------------------------------- */
+
 #ifdef NFD_IN_LSO_CNTR_ENABLE
 static unsigned int nfd_in_lso_cntr_addr = 0;
 #endif
@@ -469,6 +491,13 @@ do {                                                                         \
         __shared __gpr unsigned int jumbo_compl_seq;                         \
         int seqn_chk;                                                        \
                                                                              \
+        /* --------------k_pace --------------------------*/                 \
+        /* Read pacing rate from Issued Desc. vlan field */                  \
+        /* (only need to zero tso desc, */                                   \
+        /*   and this issued desc is not sent further) */                    \
+        uint16_t pacing_rate = batch_in_pkt##_pkt##.vlan;                    \
+        DEBUG((unsigned int)pacing_rate);                                    \
+                                                                             \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
         /* XXX __signals(&lso_sig_pair.even) lists both even and odd */      \
@@ -541,6 +570,8 @@ do {                                                                         \
                                                   notify_reset_state_gpr);   \
                 batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];      \
                 batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3];      \
+                /* k_pace: Zero vlan / l3_offset */                          \
+                batch_out.pkt##_pkt##.vlan = 0;                              \
                 _SET_DST_Q(_pkt);                                            \
                                                                              \
                 __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
