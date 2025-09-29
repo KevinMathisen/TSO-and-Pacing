@@ -110,6 +110,7 @@ __xwrite struct _pkt_desc_batch batch_out;
 
 /* -------------------- k_pace: Debug ------------------------------------------- */
 __export __emem uint32_t wire_debug[1024*1024];
+__export __emem uint32_t wire_debug_idx;
 
 __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
 
@@ -118,15 +119,18 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
  * Its contents can be read using "nfp-rtsym _wire_debug"
 */
 #define DEBUG(_a) do { \
-    if (1 && (debug_index < (10))) { \
-        __xwrite unsigned int send_data; \
+    if (1 && (debug_index < 10)) { \
         SIGNAL debug_sig;    \
-        send_data = _a;
-        __mem_write32(&send_data, wire_debug + debug_index, sizeof(send_data), sizeof(send_data), sig_done, &debug_sig); \
+        send_data = _a; \
+        __mem_write32(&send_data, wire_debug + (debug_index)), 4, 4, sig_done, &debug_sig); \
         while (!signal_test(&debug_sig));  \
         debug_index += 1; \
+        \
+        /* Zeroing the reused registers. This may however still lead to corruption of its contents */ \
+        batch_out.pkt6.__raw[2] = 0; \
     }                           \
  } while(0)
+
 
 /* --------------------------------------------------- */
 
@@ -490,13 +494,15 @@ do {                                                                         \
         SIGNAL_PAIR lso_sig_pair;                                            \
         SIGNAL_MASK lso_wait_msk;                                            \
         __shared __gpr unsigned int jumbo_compl_seq;                         \
+        __shared __gpr unsigned int raw3;                                    \
+        __xwrite unsigned int send_data;                                     \
         int seqn_chk;                                                        \
                                                                              \
         /* --------------k_pace --------------------------*/                 \
         /* Read pacing rate from Issued Desc. vlan field */                  \
         /* (only need to zero tso desc, */                                   \
         /*   and this issued desc is not sent further) */                    \
-        uint16_t pacing_rate = batch_in_pkt##_pkt##.vlan;                    \
+        uint16_t pacing_rate = batch_in.pkt##_pkt##.vlan;                    \
         DEBUG((unsigned int)pacing_rate);                                    \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
@@ -570,9 +576,11 @@ do {                                                                         \
                 batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1] |    \
                                                   notify_reset_state_gpr);   \
                 batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];      \
-                batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3];      \
                 /* k_pace: Zero vlan / l3_offset */                          \
-                batch_out.pkt##_pkt##.vlan = 0;                              \
+                raw3 = lso_pkt.desc.__raw[3];                                \
+                raw3 &= 0xFFFF0000;                                          \
+                batch_out.pkt##_pkt##.__raw[3] = raw3;                       \
+                                                                             \
                 _SET_DST_Q(_pkt);                                            \
                                                                              \
                 __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
