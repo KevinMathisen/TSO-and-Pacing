@@ -122,15 +122,11 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
     if (1 && (debug_index < 10)) { \
         SIGNAL debug_sig;    \
         send_data = _a; \
-        __mem_write32(&send_data, wire_debug + (debug_index)), 4, 4, sig_done, &debug_sig); \
+        __mem_write32(&send_data, wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
         while (!signal_test(&debug_sig));  \
         debug_index += 1; \
-        \
-        /* Zeroing the reused registers. This may however still lead to corruption of its contents */ \
-        batch_out.pkt6.__raw[2] = 0; \
     }                           \
  } while(0)
-
 
 /* --------------------------------------------------- */
 
