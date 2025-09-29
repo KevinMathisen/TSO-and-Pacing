@@ -35,7 +35,8 @@
 #include <vnic/utils/ordering.h>
 #include <vnic/utils/qc.h>
 #include <vnic/utils/qcntl.h>
-
+#include <nfp/mem_bulk.h>
+#include <std/reg_utils.h>
 
 /* TODO: get NFD_PCIE_ISL_BASE from a common header file */
 #define NOTIFY_RING_ISL (PCIE_ISL + 4)
