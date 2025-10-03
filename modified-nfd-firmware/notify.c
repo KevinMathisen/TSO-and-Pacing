@@ -504,6 +504,7 @@ do {                                                                         \
         /*   and this issued desc is not sent further) */                    \
         uint16_t pacing_rate = batch_in.pkt##_pkt##.vlan;                    \
         uint16_t pkt_cnt = 0;                                                \
+        uint32_t debug_out = 0;                                              \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
@@ -622,7 +623,7 @@ do {                                                                         \
                         NFD_IN_LSO_CNTR_T_NOTIFY_LAST_PKT_FM_LSO_RING);      \
                                                                              \
                 /* pkt_cnt in first 16 bits, pacing_rate in other 16 bits */ \
-                uint32_t debug_out = ((uint32_t)pkt_cnt << 16) |             \
+                debug_out = ((uint32_t)pkt_cnt << 16) |             \
                                      ((uint32_t)pacing_rate & 0x0000FFFF);   \
                                                                              \
                 DEBUG(debug_out);                                            \
