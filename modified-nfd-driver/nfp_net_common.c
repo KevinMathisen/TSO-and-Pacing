@@ -817,8 +817,8 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 		}
 		
 		// clamp ipg to 16 bit
-		if (ipg_100ns < U16_MAX)
-			ipg_100ns = U16_MAX
+		if (ipg_100ns > U16_MAX)
+			ipg_100ns = U16_MAX;
 		
 		txd->vlan = cpu_to_le16((u16)ipg_100ns);
 	}
