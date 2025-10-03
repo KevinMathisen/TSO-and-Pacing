@@ -816,7 +816,6 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 				ipg_100ns = max_ipg_100ns;
 		}
 		
-		// clamp ipg to 16 bit
 		if (ipg_100ns > U16_MAX)
 			ipg_100ns = U16_MAX;
 		
