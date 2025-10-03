@@ -777,17 +777,51 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 	/*
 	txd->l3_offset = l3_offset - md_bytes;
 	txd->l4_offset = l4_offset - md_bytes;
-	
-	Instead of setting the offset, we use the whole field (vlan/l3+l4_offset) to set the pacing rate
+	*/
 
-	Potential problem, could cause corruption in packets as if read as offset this is invalid offset
+	/*
+	-------------- K: pacing modifications ----------------
 
+	Instead of setting l3/l4 offset, we use the whole field 
+		(vlan/l3+l4_offset) to set the pacing rate.
 	Use tso flag to indicate TSO pacing, as if tso is used we also want pacing.
 
-	Only 16 bits -> more than sufficient for our purposes. 
-		Naive first implementation could be to state desired gap in us.
+	Firmware:
+		Does not use l3/l4 offset values
+		Interprets vlan field as IPG in 100ns ticks
+		(If later use time wheel, can set IPG in time wheel slots)
+
+	Convert sk_pacing_rate (B/s) -> IPG in 100ns (16 bits -> 100ns - 6.5ms)
 	*/
-	txd->vlan = 10;
+	{
+		struct sock *sk = skb->sk;
+		unsigned long pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;		
+
+		u32 packet_size = (u32)mss + (hdrlen - md_bytes);
+		
+		u64 ipg_100ns = 0;			// If pacing rate is 0 -> IPG is 0
+
+		/* If pacing rate is not 0, 
+			calculate IPG (in 100ns ticks) for packets in burst 
+			( IPG = packet_size / bytes_per_second * 10^7 ) */
+		if (pacing_rate && pacing_rate != ~0UL)
+			ipg_100ns = DIV_ROUND_UP( (u64)packet_size * 10000000ULL,
+													(u64)pacing_rate );
+		
+		/* Need a max ipg to not wrap queue in firmware
+			(total IPG for burst should not exceed 1ms) */
+		if (txbuf->pkt_cnt) {
+			u64 max_ipg_100ns = DIV_ROUND_UP(10000ULL, txbuf->pkt_cnt);
+			if (ipg_100ns > max_ipg_100ns) 
+				ipg_100ns = max_ipg_100ns;
+		}
+		
+		// clamp ipg to 16 bit
+		if (ipg_100ns < U16_MAX)
+			ipg_100ns = U16_MAX
+		
+		txd->vlan = cpu_to_le16((u16)ipg_100ns);
+	}
 
 	txd->lso_hdrlen = hdrlen - md_bytes;
 	txd->mss = cpu_to_le16(mss);
@@ -1096,10 +1130,13 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	/* Do not reorder - tso may adjust pkt cnt, vlan may override fields */
 	nfp_net_tx_tso(r_vec, txbuf, txd, skb, md_bytes);
 	nfp_net_tx_csum(dp, r_vec, txbuf, txd, skb);
-	if (skb_vlan_tag_present(skb) && dp->ctrl & NFP_NET_CFG_CTRL_TXVLAN) {
-		txd->flags |= PCIE_DESC_TX_VLAN;
-		txd->vlan = cpu_to_le16(skb_vlan_tag_get(skb));
-	}
+	
+	/* K: Skip VLAN, as we dont need it and it would overwrite pacing rate! */
+
+	// if (skb_vlan_tag_present(skb) && dp->ctrl & NFP_NET_CFG_CTRL_TXVLAN) {
+	// 	txd->flags |= PCIE_DESC_TX_VLAN;
+	// 	txd->vlan = cpu_to_le16(skb_vlan_tag_get(skb));
+	// }
 
 	/* Gather DMA */
 	if (nr_frags > 0) {
