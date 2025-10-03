@@ -120,7 +120,7 @@ __shared __gpr uint32_t debug_calls = 0;
  * Its contents can be read using "nfp-rtsym _wire_debug"
 */
 #define DEBUG(_a) do { \
-    if (debug_index < 20) { \
+    if (debug_index < 100) { \
         if (debug_calls%10 == 0) { \
             SIGNAL debug_sig;    \
             send_data = _a; \
@@ -503,7 +503,7 @@ do {                                                                         \
         /* (only need to zero tso desc, */                                   \
         /*   and this issued desc is not sent further) */                    \
         uint16_t pacing_rate = batch_in.pkt##_pkt##.vlan;                    \
-        DEBUG((unsigned int)pacing_rate);                                    \
+        uint16_t pkt_cnt = 0;                                                \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
@@ -513,6 +513,7 @@ do {                                                                         \
                                                                              \
          /* finished packet with LSO to handle */                            \
         for (;;) {                                                           \
+            pkt_cnt++;                                                       \
             /* read packet from nfd_in_issued_lso_ring */                    \
             lso_ring_get(lso_ring_num, lso_ring_addr, lso_xnum,              \
                          sizeof(lso_pkt), sig_done, &lso_sig_pair);          \
@@ -620,6 +621,11 @@ do {                                                                         \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_LAST_PKT_FM_LSO_RING);      \
                                                                              \
+                /* pkt_cnt in first 16 bits, pacing_rate in other 16 bits */ \
+                uint32_t debug_out = ((uint32_t)pkt_cnt << 16) |             \
+                                     ((uint32_t)pacing_rate & 0x0000FFFF);   \
+                                                                             \
+                DEBUG(debug_out);                                            \
                 /* Break out of loop processing LSO ring */                  \
                 /* TODO how can we catch obvious MU ring corruption? */      \
                 break;                                                       \
