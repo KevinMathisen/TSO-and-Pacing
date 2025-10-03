@@ -501,7 +501,7 @@ do {                                                                         \
                                                                              \
                                                                              \
          /* finished packet with LSO to handle */                            \
-        for (;;) {                                                           \
+        for (;;) {                                                           \  /* TODO: check if this  points to all TSO packets in one chunk*/
             /* read packet from nfd_in_issued_lso_ring */                    \
             lso_ring_get(lso_ring_num, lso_ring_addr, lso_xnum,              \
                          sizeof(lso_pkt), sig_done, &lso_sig_pair);          \
