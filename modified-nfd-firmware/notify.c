@@ -123,8 +123,8 @@ __shared __gpr uint32_t debug_calls = 0;
     if (debug_index < 100) { \
         if (debug_calls%10 == 0) { \
             SIGNAL debug_sig;    \
-            send_data = _a; \
-            __mem_write32(&send_data, wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
+            batch_out.pkt8.__raw[4] = _a; \
+            __mem_write32(&batch_out.pkt8.__raw[4], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
             while (!signal_test(&debug_sig));  \
             debug_index += 1; \
         } \
@@ -495,7 +495,6 @@ do {                                                                         \
         SIGNAL_MASK lso_wait_msk;                                            \
         __shared __gpr unsigned int jumbo_compl_seq;                         \
         __shared __gpr unsigned int raw3;                                    \
-        __xwrite unsigned int send_data;                                     \
         int seqn_chk;                                                        \
                                                                              \
         /* --------------k_pace --------------------------*/                 \
@@ -623,7 +622,7 @@ do {                                                                         \
                         NFD_IN_LSO_CNTR_T_NOTIFY_LAST_PKT_FM_LSO_RING);      \
                                                                              \
                 /* pkt_cnt in first 16 bits, pacing_rate in other 16 bits */ \
-                debug_out = ((uint32_t)pkt_cnt << 16) |             \
+                debug_out = ((uint32_t)pkt_cnt << 16) |                      \
                                      ((uint32_t)pacing_rate & 0x0000FFFF);   \
                                                                              \
                 DEBUG(debug_out);                                            \
