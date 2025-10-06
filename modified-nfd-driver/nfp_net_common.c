@@ -73,7 +73,7 @@
 
 struct gso_seg_hist { u32 bins[GSO_SEG_ARRAY_SIZE]; };
 
-DEFINE_PER_CPU(gso_seg_hist, gso_seg_cnt_counter);
+DEFINE_PER_CPU(struct gso_seg_hist, gso_seg_cnt_counter);
 
 /* ---------- */
 
