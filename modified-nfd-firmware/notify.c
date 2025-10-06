@@ -118,10 +118,11 @@ __shared __gpr uint32_t debug_calls = 0;
 /* 
  * Write a 32-bit words to EMEM for debugging, without swapping contexts. 
  * Its contents can be read using "nfp-rtsym _wire_debug"
+ * (We print 800th to 1000th tso burst)
 */
 #define DEBUG(_a) do { \
     if (debug_index < 200) { \
-        if (debug_calls > 100) { \
+        if (debug_calls >= 800) { \
             SIGNAL debug_sig;    \
             batch_out.pkt7.__raw[3] = _a; \
             __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
