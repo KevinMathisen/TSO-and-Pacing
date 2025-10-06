@@ -63,19 +63,6 @@
 #include "nfp_port.h"
 #include "crypto/crypto.h"
 
-/* --------- K: pacing modifications ------------
-	Create array/histogram per cpu for counting Gso seg size
-	which can be probed by using debugfs
-
-	Have one array per CPU to decrease overhead
-*/
-#define GSO_SEG_ARRAY_SIZE 64
-
-struct gso_seg_hist { u32 bins[GSO_SEG_ARRAY_SIZE]; };
-
-DEFINE_PER_CPU(struct gso_seg_hist, gso_seg_cnt_counter);
-
-/* ---------- */
 
 
 /**
@@ -788,15 +775,6 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 	txbuf->pkt_cnt = skb_shinfo(skb)->gso_segs;
 	txbuf->real_len += hdrlen * (txbuf->pkt_cnt - 1);
 
-	/* K: pacing modifications (stats) 
-		Count pkt_cnt
-	*/
-	{
-		u32 gso_seg_cnt = (u32)txbuf->pkt_cnt;
-		if (gso_seg_cnt >= GSO_SEG_ARRAY_SIZE) 
-			gso_seg_cnt = GSO_SEG_ARRAY_SIZE - 1;
-		this_cpu_inc(gso_seg_cnt_counter.bins[gso_seg_cnt]);
-	}
 
 	mss = skb_shinfo(skb)->gso_size & PCIE_DESC_TX_MSS_MASK;
 	/*
