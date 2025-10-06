@@ -63,7 +63,10 @@
 #include "nfp_port.h"
 #include "crypto/crypto.h"
 
-
+/* K: pacing modifications
+   Store print call counter for each CPU */
+static DEFINE_PER_CPU(u32, printk_call_counter);
+this_cpu_write(printk_call_counter, 0);
 
 /**
  * nfp_net_get_fw_version() - Read and parse the FW version
@@ -823,6 +826,15 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 			ipg_100ns = U16_MAX;
 		
 		txd->vlan = cpu_to_le16((u16)ipg_100ns);
+
+		/* Print stats first 10 calls */
+		if (this_cpu_read(printk_call_counter) <= 10) {
+			this_cpu_inc(printk_call_counter);
+
+			printk(KERN_DEBUG "Kevin tso stats: pkt_cnt=%i, skb_len=%i, pacing_rate=%i, packet_size=%i", 
+							txbuf->pkt_cnt, skb->len, pacing_rate, packet_size);
+		} 	
+		
 	}
 
 	txd->lso_hdrlen = hdrlen - md_bytes;
