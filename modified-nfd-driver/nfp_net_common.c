@@ -742,6 +742,45 @@ static void nfp_net_tx_ring_stop(struct netdev_queue *nd_q,
 }
 
 /**
+ * nfp_net_tx_non_tso_ipg() - Set up IPG for non-LSO Tx descriptors
+ * @txbuf: Pointer to driver soft TX descriptor
+ * @txd: Pointer to HW TX descriptor
+ * @skb: Pointer to SKB
+ * @md_bytes: Prepend length
+ *
+ * Set up IPG for non-LSO Tx descriptor, do nothing for LSO skbs.
+ */
+static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_buf txbuf, 
+				struct nfp_net_tx_desc txd, struct sk_buff skb,
+				u32 md_bytes) 
+{
+	if (skb_is_gso(skb))
+		return;
+
+	struct sock *sk = skb->sk;
+	unsigned long pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;
+
+	u32 packet_size = skb->len - md_bytes;
+
+	u64 ipg_100ns = 0;
+
+	if (pacing_rate && pacing_rate != ~0UL)
+			ipg_100ns = DIV_ROUND_UP( (u64)packet_size * 10000000ULL,
+													(u64)pacing_rate );
+
+	/* Can maybe set max ipg to lower to prevent edge cases, e.g. 900us */
+	u64 max_ipg_100ns = 10000ULL;
+	if (ipg_100ns > max_ipg_100ns) 
+		ipg_100ns = max_ipg_100ns;
+		
+	if (ipg_100ns > U16_MAX)
+	 	ipg_100ns = U16_MAX;
+	
+	txd->vlan = cpu_to_le16((u16)ipg_100ns);
+
+}
+
+/**
  * nfp_net_tx_tso() - Set up Tx descriptor for LSO
  * @r_vec: per-ring structure
  * @txbuf: Pointer to driver soft TX descriptor
@@ -821,6 +860,7 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 				ipg_100ns = max_ipg_100ns;
 		}
 		
+		// TODO: clamp further to 12 bits
 		if (ipg_100ns > U16_MAX)
 			ipg_100ns = U16_MAX;
 		
@@ -907,6 +947,54 @@ static void nfp_net_tx_csum(struct nfp_net_dp *dp,
 	else
 		r_vec->hw_csum_tx += txbuf->pkt_cnt;
 	u64_stats_update_end(&r_vec->tx_sync);
+}
+
+/*
+ * nfp_net_tx_set_flow_id() - Set flowId field for Tx descriptors
+ * @txbuf: Pointer to driver soft TX descriptor
+ * @txd: Pointer to HW TX descriptor
+ * @skb: Pointer to SKB
+ * @md_bytes: Prepend length
+ *
+ * Set flowId field for Tx descriptors
+ */
+static void nfp_net_tx_set_flow_id(struct nfp_net_tx_buf txbuf, 
+				struct nfp_net_tx_desc txd, struct sk_buff skb,
+				u32 md_bytes) 
+{
+	/*
+	Cookie to flow ID mapping
+
+
+		| cookie 4 | -- | cookie1 | cookie2	|
+		  	 
+	*/
+
+	u64 cookie = bpf_get_socket_cookie(skb);
+
+	/* Check if cookie is in mapping. If so use flow ID (index) here */
+
+	/* If no mapping, we overwrite last/oldest flows mapping. */
+
+
+	u32 packet_size = skb->len - md_bytes;
+
+	u64 ipg_100ns = 0;
+
+	if (pacing_rate && pacing_rate != ~0UL)
+			ipg_100ns = DIV_ROUND_UP( (u64)packet_size * 10000000ULL,
+													(u64)pacing_rate );
+
+	/* Can maybe set max ipg to lower to prevent edge cases, e.g. 900us */
+	u64 max_ipg_100ns = 10000ULL;
+	if (ipg_100ns > max_ipg_100ns) 
+		ipg_100ns = max_ipg_100ns;
+		
+	if (ipg_100ns > U16_MAX)
+	 	ipg_100ns = U16_MAX;
+	
+	txd->vlan = cpu_to_le16((u16)ipg_100ns);
+
 }
 
 static struct sk_buff *
@@ -1142,8 +1230,10 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	txd->lso_hdrlen = 0;
 
 	/* Do not reorder - tso may adjust pkt cnt, vlan may override fields */
+	nfp_net_tx_non_tso_ipg(txbuf, txd, skb, md_bytes);
 	nfp_net_tx_tso(r_vec, txbuf, txd, skb, md_bytes);
 	nfp_net_tx_csum(dp, r_vec, txbuf, txd, skb);
+	nfp_net_tx_set_flow_id(txbuf, txd, skb, md_bytes);
 	
 	/* K: Skip VLAN, as we dont need it and it would overwrite pacing rate! */
 
