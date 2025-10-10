@@ -66,6 +66,8 @@
 /* K: pacing modifications
    Store print call counter for each CPU */
 static DEFINE_PER_CPU(u32, printk_call_counter);
+static u64 cookie_to_flowid[8];
+static u32 last_flowid_idx;
 
 /**
  * nfp_net_get_fw_version() - Read and parse the FW version
@@ -773,8 +775,8 @@ static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_buf txbuf,
 	if (ipg_500ns > max_ipg_500ns) 
 		ipg_500ns = max_ipg_500ns;
 		
-	if (ipg_500ns > U16_MAX)
-	 	ipg_500ns = U16_MAX;
+	if (ipg_500ns > 0xFFF)
+	 	ipg_500ns = 0xFFF;
 	
 	txd->vlan = cpu_to_le16((u16)ipg_500ns);
 
@@ -828,14 +830,13 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 
 	Instead of setting l3/l4 offset, we use the whole field 
 		(vlan/l3+l4_offset) to set the pacing rate.
-	Use tso flag to indicate TSO pacing, as if tso is used we also want pacing.
 
 	Firmware:
 		Does not use l3/l4 offset values
 		Interprets vlan field as IPG in 100ns ticks
 		(If later use time wheel, can set IPG in time wheel slots)
 
-	Convert sk_pacing_rate (B/s) -> IPG in 100ns (16 bits -> 100ns - 6.5ms)
+	Convert sk_pacing_rate (B/s) -> IPG in 500ns (12 bits -> 500ns - 2.048ms)
 	*/
 	{
 		struct sock *sk = skb->sk;
@@ -860,10 +861,17 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 				ipg_500ns = max_ipg_500ns;
 		}
 		
-		// TODO: clamp further to 12 bits
-		if (ipg_500ns > U16_MAX)
-			ipg_500ns = U16_MAX;
+		// clamp to 12 bits
+		if (ipg_500ns > 0xFFF)
+			ipg_500ns = 0xFFF;
 		
+		/* 16 bit Vlan field: 
+		15      12 11               0
+		+---------+-----------------+
+		| FLOW_ID | PACING_RATE     |
+		+---------+-----------------+
+			4 bits     12 bits
+		*/
 		txd->vlan = cpu_to_le16((u16)ipg_500ns);
 
 		/* Print stats from 100th to 140th call */
@@ -958,43 +966,51 @@ static void nfp_net_tx_csum(struct nfp_net_dp *dp,
  *
  * Set flowId field for Tx descriptors
  */
-static void nfp_net_tx_set_flow_id(struct nfp_net_tx_buf txbuf, 
-				struct nfp_net_tx_desc txd, struct sk_buff skb,
-				u32 md_bytes) 
+static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
+				struct sk_buff *skb) 
 {
 	/*
-	Cookie to flow ID mapping
+	Cookie to flow ID mapping:
 
-
-		| cookie 4 | -- | cookie1 | cookie2	|
-		  	 
+		last_flowid_idx				this maps to flowID 3
+			|								|
+		+----------+-------+---------+----------+-----+
+		| cookie 4 |   -   | cookie1 | cookie2	| ... |
+		+----------+-------+---------+----------+-----+
 	*/
 
-	u64 cookie = bpf_get_socket_cookie(skb);
+	struct sock *sk = skb->sk;
+	if (!sk) return;
+
+	u64 cookie = sock_gen_cookie(sk);
+	u16 flowId = 15;
 
 	/* Check if cookie is in mapping. If so use flow ID (index) here */
+	for (int i = 0; i < 8; i++) {
+		if (READ_ONCE(cookie_to_flowid[i]) == cookie) {
+			flowId = i;
+			break;
+		}
+	}
 
 	/* If no mapping, we overwrite last/oldest flows mapping. */
+	if (flowId == 15) {
+		unsigned int idx = (READ_ONCE(last_flowid_idx)+1)&7;
+		WRITE_ONCE(cookie_to_flowid[idx], cookie);
+		WRITE_ONCE(last_flowid_idx, idx);
+		flowId = idx;
+	}
 
-
-	u32 packet_size = skb->len - md_bytes;
-
-	u64 ipg_100ns = 0;
-
-	if (pacing_rate && pacing_rate != ~0UL)
-			ipg_100ns = DIV_ROUND_UP( (u64)packet_size * 10000000ULL,
-													(u64)pacing_rate );
-
-	/* Can maybe set max ipg to lower to prevent edge cases, e.g. 900us */
-	u64 max_ipg_100ns = 10000ULL;
-	if (ipg_100ns > max_ipg_100ns) 
-		ipg_100ns = max_ipg_100ns;
-		
-	if (ipg_100ns > U16_MAX)
-	 	ipg_100ns = U16_MAX;
-	
-	txd->vlan = cpu_to_le16((u16)ipg_100ns);
-
+	/* 16 bit Vlan field: 
+	  15      12 11               0
+	  +---------+-----------------+
+	  | FLOW_ID | PACING_RATE     |
+	  +---------+-----------------+
+	    4 bits     12 bits
+	*/
+	u16 vlan_field = le16_to_cpu(txd->vlan);
+	vlan_field |= ((flowId & 0xF) << 12);
+	txd->vlan = cpu_to_le16(vlan_field);
 }
 
 static struct sk_buff *
@@ -1229,7 +1245,7 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	txd->mss = 0;
 	txd->lso_hdrlen = 0;
 
-	/* Do not reorder - tso may adjust pkt cnt, vlan may override fields */
+	/* Do not reorder - tso may adjust pkt cnt, flow id may overwrite vlan field */
 	nfp_net_tx_non_tso_ipg(txbuf, txd, skb, md_bytes);
 	nfp_net_tx_tso(r_vec, txbuf, txd, skb, md_bytes);
 	nfp_net_tx_csum(dp, r_vec, txbuf, txd, skb);
