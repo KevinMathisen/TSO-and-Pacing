@@ -745,7 +745,6 @@ static void nfp_net_tx_ring_stop(struct netdev_queue *nd_q,
 
 /**
  * nfp_net_tx_non_tso_ipg() - Set up IPG for non-LSO Tx descriptors
- * @txbuf: Pointer to driver soft TX descriptor
  * @txd: Pointer to HW TX descriptor
  * @skb: Pointer to SKB
  * @md_bytes: Prepend length
@@ -754,14 +753,14 @@ static void nfp_net_tx_ring_stop(struct netdev_queue *nd_q,
  */
 static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
 				struct sk_buff *skb, u32 md_bytes) 
-{
-	if (skb_is_gso(skb))
-		return;
-
+{	
 	struct sock *sk;
 	unsigned long pacing_rate;
 	u32 packet_size;
 	u64 ipg_500ns, max_ipg_500ns;
+	
+	if (skb_is_gso(skb))
+		return;
 
 	sk = skb->sk;
 	pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;
@@ -966,12 +965,10 @@ static void nfp_net_tx_csum(struct nfp_net_dp *dp,
 	u64_stats_update_end(&r_vec->tx_sync);
 }
 
-/*
+/**
  * nfp_net_tx_set_flow_id() - Set flowId field for Tx descriptors
- * @txbuf: Pointer to driver soft TX descriptor
  * @txd: Pointer to HW TX descriptor
  * @skb: Pointer to SKB
- * @md_bytes: Prepend length
  *
  * Set flowId field for Tx descriptors
  */
@@ -989,11 +986,11 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	*/
 
 	u32 flow_hash;
+	u16 flowId, vlan_field;
+	int i;
+
 	flow_hash = skb_get_hash(skb);
 	if (!flow_hash) return;
-
-	u16 flowId;
-	int i;
 
 	flowId = 15;
 	/* Check if hash is in mapping. If so use flow ID (index) here */
@@ -1019,7 +1016,7 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	  +---------+-----------------+
 	    4 bits     12 bits
 	*/
-	u16 vlan_field = le16_to_cpu(txd->vlan);
+	vlan_field = le16_to_cpu(txd->vlan);
 	vlan_field |= ((flowId & 0xF) << 12);
 	txd->vlan = cpu_to_le16(vlan_field);
 }
@@ -1257,10 +1254,10 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	txd->lso_hdrlen = 0;
 
 	/* Do not reorder - tso may adjust pkt cnt, flow id may overwrite vlan field */
-	nfp_net_tx_non_tso_ipg(txbuf, txd, skb, md_bytes);
+	nfp_net_tx_non_tso_ipg(txd, skb, md_bytes);
 	nfp_net_tx_tso(r_vec, txbuf, txd, skb, md_bytes);
 	nfp_net_tx_csum(dp, r_vec, txbuf, txd, skb);
-	nfp_net_tx_set_flow_id(txbuf, txd, skb, md_bytes);
+	nfp_net_tx_set_flow_id(txd, skb);
 	
 	/* K: Skip VLAN, as we dont need it and it would overwrite pacing rate! */
 
