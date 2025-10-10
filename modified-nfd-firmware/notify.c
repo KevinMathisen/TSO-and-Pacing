@@ -502,7 +502,9 @@ do {                                                                         \
         /* Read pacing rate from Issued Desc. vlan field */                  \
         /* (only need to zero tso desc, */                                   \
         /*   and this issued desc is not sent further) */                    \
-        uint16_t pacing_rate = batch_in.pkt##_pkt##.vlan;                    \
+        uint16_t vlan_field = batch_in.pkt##_pkt##.vlan;                     \
+        uint16_t pacing_rate = vlan_field & 0x0FFF;                          \
+        uint16_t flow_id = (vlan_field >> 12) & 0x000F;                      \
         uint16_t pkt_cnt = 0;                                                \
         uint32_t debug_out = 0;                                              \
                                                                              \
@@ -626,7 +628,7 @@ do {                                                                         \
                 debug_out = ((uint32_t)pkt_cnt << 16) |                      \
                                      ((uint32_t)pacing_rate & 0x0000FFFF);   \
                                                                              \
-                DEBUG(debug_out);                                            \
+                DEBUG((uint32_t)flow_id);                                    \
                 /* Break out of loop processing LSO ring */                  \
                 /* TODO how can we catch obvious MU ring corruption? */      \
                 break;                                                       \
