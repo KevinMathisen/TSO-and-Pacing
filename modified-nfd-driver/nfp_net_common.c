@@ -63,6 +63,8 @@
 #include "nfp_port.h"
 #include "crypto/crypto.h"
 
+#include <linux/sock_diag.h>
+
 /* K: pacing modifications
    Store print call counter for each CPU */
 static DEFINE_PER_CPU(u32, printk_call_counter);
@@ -752,26 +754,30 @@ static void nfp_net_tx_ring_stop(struct netdev_queue *nd_q,
  *
  * Set up IPG for non-LSO Tx descriptor, do nothing for LSO skbs.
  */
-static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_buf txbuf, 
-				struct nfp_net_tx_desc txd, struct sk_buff skb,
-				u32 md_bytes) 
+static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
+				struct sk_buff *skb, u32 md_bytes) 
 {
 	if (skb_is_gso(skb))
 		return;
 
-	struct sock *sk = skb->sk;
-	unsigned long pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;
+	struct sock *sk;
+	unsigned long pacing_rate;
+	u32 packet_size;
+	u64 ipg_500ns, max_ipg_500ns;
 
-	u32 packet_size = skb->len - md_bytes;
+	sk = skb->sk;
+	pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;
 
-	u64 ipg_500ns = 0;
+	packet_size = skb->len - md_bytes;
+
+	ipg_500ns = 0;
 
 	if (pacing_rate && pacing_rate != ~0UL)
 			ipg_500ns = DIV_ROUND_UP( (u64)packet_size * 2000000ULL,
 													(u64)pacing_rate );
 
 	/* Can maybe set max ipg to lower to prevent edge cases, e.g. 900us */
-	u64 max_ipg_500ns = 2000ULL;
+	max_ipg_500ns = 2000ULL;
 	if (ipg_500ns > max_ipg_500ns) 
 		ipg_500ns = max_ipg_500ns;
 		
@@ -839,12 +845,17 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 	Convert sk_pacing_rate (B/s) -> IPG in 500ns (12 bits -> 500ns - 2.048ms)
 	*/
 	{
-		struct sock *sk = skb->sk;
-		unsigned long pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;		
+		struct sock *sk;
+		unsigned long pacing_rate;
+		u32 packet_size;
+		u64 ipg_500ns, max_ipg_500ns;
 
-		u32 packet_size = (u32)mss + (hdrlen - md_bytes);
+		sk = skb->sk;
+		pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;		
+
+		packet_size = (u32)mss + (hdrlen - md_bytes);
 		
-		u64 ipg_500ns = 0;			// If pacing rate is 0 -> IPG is 0
+		ipg_500ns = 0;			// If pacing rate is 0 -> IPG is 0
 
 		/* If pacing rate is not 0, 
 			calculate IPG (in 500ns ticks) for packets in burst 
@@ -856,7 +867,7 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 		/* Need a max ipg to not wrap queue in firmware
 			(total IPG for burst should not exceed 1ms) */
 		if (txbuf->pkt_cnt) {
-			u64 max_ipg_500ns = DIV_ROUND_UP(2000ULL, txbuf->pkt_cnt);
+			max_ipg_500ns = DIV_ROUND_UP(2000ULL, txbuf->pkt_cnt);
 			if (ipg_500ns > max_ipg_500ns) 
 				ipg_500ns = max_ipg_500ns;
 		}
@@ -982,11 +993,17 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	struct sock *sk = skb->sk;
 	if (!sk) return;
 
-	u64 cookie = sock_gen_cookie(sk);
-	u16 flowId = 15;
+	u64 cookie;
+	u32 cookie_parts[2];
+	u16 flowId;
+	int i;
 
+	sock_diag_save_cookie(sk, cookie_parts);
+	cookie = ((u64)c[1] << 32) | c[0];
+
+	flowId = 15;
 	/* Check if cookie is in mapping. If so use flow ID (index) here */
-	for (int i = 0; i < 8; i++) {
+	for (i = 0; i < 8; i++) {
 		if (READ_ONCE(cookie_to_flowid[i]) == cookie) {
 			flowId = i;
 			break;
