@@ -63,12 +63,10 @@
 #include "nfp_port.h"
 #include "crypto/crypto.h"
 
-#include <linux/sock_diag.h>
-
 /* K: pacing modifications
    Store print call counter for each CPU */
 static DEFINE_PER_CPU(u32, printk_call_counter);
-static u64 cookie_to_flowid[8];
+static u32 hash_to_flowid[8];
 static u32 last_flowid_idx;
 
 /**
@@ -981,30 +979,26 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 				struct sk_buff *skb) 
 {
 	/*
-	Cookie to flow ID mapping:
+	Hash to flow ID mapping:
 
 		last_flowid_idx				this maps to flowID 3
 			|								|
 		+----------+-------+---------+----------+-----+
-		| cookie 4 |   -   | cookie1 | cookie2	| ... |
+		| hash 4   |   -   | hash 1  | hash 2	| ... |
 		+----------+-------+---------+----------+-----+
 	*/
 
-	struct sock *sk = skb->sk;
-	if (!sk) return;
+	u32 flow_hash;
+	flow_hash = skb_get_hash(skb);
+	if (!flow_hash) return;
 
-	u64 cookie;
-	u32 cookie_parts[2];
 	u16 flowId;
 	int i;
 
-	sock_diag_save_cookie(sk, cookie_parts);
-	cookie = ((u64)c[1] << 32) | c[0];
-
 	flowId = 15;
-	/* Check if cookie is in mapping. If so use flow ID (index) here */
+	/* Check if hash is in mapping. If so use flow ID (index) here */
 	for (i = 0; i < 8; i++) {
-		if (READ_ONCE(cookie_to_flowid[i]) == cookie) {
+		if (READ_ONCE(hash_to_flowid[i]) == flow_hash) {
 			flowId = i;
 			break;
 		}
@@ -1013,7 +1007,7 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	/* If no mapping, we overwrite last/oldest flows mapping. */
 	if (flowId == 15) {
 		unsigned int idx = (READ_ONCE(last_flowid_idx)+1)&7;
-		WRITE_ONCE(cookie_to_flowid[idx], cookie);
+		WRITE_ONCE(hash_to_flowid[idx], flow_hash);
 		WRITE_ONCE(last_flowid_idx, idx);
 		flowId = idx;
 	}
