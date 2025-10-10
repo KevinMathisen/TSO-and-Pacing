@@ -762,21 +762,21 @@ static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_buf txbuf,
 
 	u32 packet_size = skb->len - md_bytes;
 
-	u64 ipg_100ns = 0;
+	u64 ipg_500ns = 0;
 
 	if (pacing_rate && pacing_rate != ~0UL)
-			ipg_100ns = DIV_ROUND_UP( (u64)packet_size * 10000000ULL,
+			ipg_500ns = DIV_ROUND_UP( (u64)packet_size * 2000000ULL,
 													(u64)pacing_rate );
 
 	/* Can maybe set max ipg to lower to prevent edge cases, e.g. 900us */
-	u64 max_ipg_100ns = 10000ULL;
-	if (ipg_100ns > max_ipg_100ns) 
-		ipg_100ns = max_ipg_100ns;
+	u64 max_ipg_500ns = 2000ULL;
+	if (ipg_500ns > max_ipg_500ns) 
+		ipg_500ns = max_ipg_500ns;
 		
-	if (ipg_100ns > U16_MAX)
-	 	ipg_100ns = U16_MAX;
+	if (ipg_500ns > U16_MAX)
+	 	ipg_500ns = U16_MAX;
 	
-	txd->vlan = cpu_to_le16((u16)ipg_100ns);
+	txd->vlan = cpu_to_le16((u16)ipg_500ns);
 
 }
 
@@ -843,28 +843,28 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 
 		u32 packet_size = (u32)mss + (hdrlen - md_bytes);
 		
-		u64 ipg_100ns = 0;			// If pacing rate is 0 -> IPG is 0
+		u64 ipg_500ns = 0;			// If pacing rate is 0 -> IPG is 0
 
 		/* If pacing rate is not 0, 
-			calculate IPG (in 100ns ticks) for packets in burst 
-			( IPG = packet_size / bytes_per_second * 10^7 ) */
+			calculate IPG (in 500ns ticks) for packets in burst 
+			( IPG = packet_size / bytes_per_second * 2*10^6 ) */
 		if (pacing_rate && pacing_rate != ~0UL)
-			ipg_100ns = DIV_ROUND_UP( (u64)packet_size * 10000000ULL,
+			ipg_500ns = DIV_ROUND_UP( (u64)packet_size * 2000000ULL,
 													(u64)pacing_rate );
 		
 		/* Need a max ipg to not wrap queue in firmware
 			(total IPG for burst should not exceed 1ms) */
 		if (txbuf->pkt_cnt) {
-			u64 max_ipg_100ns = DIV_ROUND_UP(10000ULL, txbuf->pkt_cnt);
-			if (ipg_100ns > max_ipg_100ns) 
-				ipg_100ns = max_ipg_100ns;
+			u64 max_ipg_500ns = DIV_ROUND_UP(2000ULL, txbuf->pkt_cnt);
+			if (ipg_500ns > max_ipg_500ns) 
+				ipg_500ns = max_ipg_500ns;
 		}
 		
 		// TODO: clamp further to 12 bits
-		if (ipg_100ns > U16_MAX)
-			ipg_100ns = U16_MAX;
+		if (ipg_500ns > U16_MAX)
+			ipg_500ns = U16_MAX;
 		
-		txd->vlan = cpu_to_le16((u16)ipg_100ns);
+		txd->vlan = cpu_to_le16((u16)ipg_500ns);
 
 		/* Print stats from 100th to 140th call */
 		if (this_cpu_read(printk_call_counter) < 140) {
