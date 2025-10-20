@@ -108,32 +108,6 @@ static unsigned int next_ctx;
 
 __xwrite struct _pkt_desc_batch batch_out;
 
-/* -------------------- k_pace: Debug ------------------------------------------- */
-__export __emem uint32_t wire_debug[1024*1024];
-__export __emem uint32_t wire_debug_idx;
-
-__shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
-__shared __gpr uint32_t debug_calls = 0;
-
-/* 
- * Write a 32-bit words to EMEM for debugging, without swapping contexts. 
- * Its contents can be read using "nfp-rtsym _wire_debug"
- * (We print 800th to 1000th tso burst)
-*/
-#define DEBUG(_a) do { \
-    if (debug_index < 200) { \
-        if (debug_calls >= 800) { \
-            SIGNAL debug_sig;    \
-            batch_out.pkt7.__raw[3] = _a; \
-            __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
-            while (!signal_test(&debug_sig));  \
-            debug_index += 1; \
-        } \
-        debug_calls += 1; \
-    } \
- } while(0)
-
-/* --------------------------------------------------- */
 
 #ifdef NFD_IN_LSO_CNTR_ENABLE
 static unsigned int nfd_in_lso_cntr_addr = 0;
@@ -290,6 +264,138 @@ do {                                                                    \
 __xread unsigned int notify_reset_state_xfer = 0;
 __shared __gpr unsigned int notify_reset_state_gpr = 0;
 
+/* ========================================================================================*/
+/* -------- k_pace: constants/shared variables -------- */
+/* ========================================================================================*/
+
+#define PACING_QUEUE_SIZE 80
+
+/* k_pace: declare packet size as shared gpr */
+__shared __gpr unsigned int out_msg_sz = sizeof(struct nfd_in_pkt_desc);
+
+/* k_pace: Pacing queue */
+__shared __lmem struct nfd_in_pkt_desc pacing_queue[PACING_QUEUE_SIZE];
+__shared __gpr unsigned int head_queue = 0;
+__shared __gpr unsigned int tail_queue = 0;
+__shared __gpr unsigned int len_queue = 0;
+
+#define _DEQUEUE_PROC(_pkt)                                             \
+do {                                                                    \
+    wait_for_all(&wq_sig##_pkt);                                        \
+                                                                        \
+    raw0_buff = pacing_queue[head_queue].__raw[0];                      \
+    /* Set deqn of packet, then increase counter */                     \
+    __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }              \
+    __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
+                                                                        \
+    batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
+    batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
+    batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
+    batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
+                                                                        \
+    head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
+                                                                        \
+    _SET_DST_Q(_pkt);                                                   \
+    __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
+                            out_msg_sz, out_msg_sz, sig_done,           \
+                            &wq_sig##_pkt);                             \
+                                                                        \
+} while (0)
+
+/**
+ * Dequeue up to batch of packets and send to work queue
+ *
+ */
+__intrinsic void
+dequeue_pacing_queue() {
+    unsigned int qc_queue;
+    unsigned int dequeue_batch_size;
+    __gpr uint32_t raw0_buff;
+
+    if (len_queue) {
+        /* Update queue size so no other workers will steal our work */
+        dequeue_batch_size = (len_queue < 8) ? len_queue : 8;
+        len_queue -= dequeue_batch_size;
+
+        /* do ADD_SEQN_PREP (point csr to seqn for this queue) */
+        /* TODO: might be redundant when also LM for desc. However could use this to make desc read more efficient. */
+        /*       Could also prewrite seqnm to GPR */
+        local_csr_write(
+            local_csr_active_lm_addr_3,
+            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(pacing_queue[head_queue].__raw[0])]);
+
+        /* get QC queue for batch */
+        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(pacing_queue[head_queue].q_num),
+                               NFD_IN_TX_QUEUE);
+
+        /* Place packets in xfer out, add to work queue */
+        /* Add packets we process to wait mask, and use this signal */
+        if (dequeue_batch_size >= 1)
+            _DEQUEUE_PROC(0);
+
+        if (dequeue_batch_size >= 2) {
+            _DEQUEUE_PROC(1);
+        }
+
+        if (dequeue_batch_size >= 3) {
+            _DEQUEUE_PROC(2);
+        }
+
+        if (dequeue_batch_size >= 4) {
+            _DEQUEUE_PROC(3);
+        }
+
+        if (dequeue_batch_size >= 5) {
+            _DEQUEUE_PROC(4);
+        }
+
+        if (dequeue_batch_size >= 6) {
+            _DEQUEUE_PROC(5);
+        }
+
+        if (dequeue_batch_size >= 7) {
+            _DEQUEUE_PROC(6);
+        }
+
+        if (dequeue_batch_size >= 8) {
+            _DEQUEUE_PROC(7);
+        }
+
+        wait_for_all(&qc_sig);
+        __implicit_read(&qc_sig);
+
+        /* Increment the TX_R pointer for this queue by dequeue_batch_size */
+        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, dequeue_batch_size,
+                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+    }
+}
+
+/* -------------------- k_pace: Debug ------------------------------------------- */
+__export __emem uint32_t wire_debug[1024*1024];
+__export __emem uint32_t wire_debug_idx;
+
+__shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
+__shared __gpr uint32_t debug_calls = 0;
+
+/*
+ * Write a 32-bit words to EMEM for debugging, without swapping contexts.
+ * Its contents can be read using "nfp-rtsym _wire_debug"
+ * (We print 800th to 1000th tso burst)
+*/
+#define DEBUG(_a) do { \
+    if (debug_index < 200) { \
+        if (debug_calls >= 800) { \
+            SIGNAL debug_sig;    \
+            batch_out.pkt7.__raw[3] = _a; \
+            __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
+            while (!signal_test(&debug_sig));  \
+            debug_index += 1; \
+        } \
+        debug_calls += 1; \
+    } \
+ } while(0)
+
+/* --------------------------------------------------- */
 
 /* XXX Move to some sort of CT reflect library */
 __intrinsic void
@@ -472,6 +578,13 @@ do {                                                                         \
                          NFD_IN_LSO_CNTR_T_NOTIFY_ALL_PKT_DESC);             \
     /* finished packet and no LSO */                                         \
     if (batch_in.pkt##_pkt##.eop) {                                          \
+                                                                             \
+        /* --------------k_pace --------------------------*/                 \
+        /* Read pacing rate + flow id from vlan field */                     \
+        uint16_t vlan_field = batch_in.pkt##_pkt##.vlan;                     \
+        uint16_t pacing_rate = vlan_field & 0x0FFF;                          \
+        uint16_t flow_id = (vlan_field >> 12) & 0x000F;                      \
+                                                                             \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_NON_LSO_PKT_DESC);     \
         __critical_path();                                                   \
@@ -500,13 +613,9 @@ do {                                                                         \
                                                                              \
         /* --------------k_pace --------------------------*/                 \
         /* Read pacing rate from Issued Desc. vlan field */                  \
-        /* (only need to zero tso desc, */                                   \
-        /*   and this issued desc is not sent further) */                    \
         uint16_t vlan_field = batch_in.pkt##_pkt##.vlan;                     \
         uint16_t pacing_rate = vlan_field & 0x0FFF;                          \
         uint16_t flow_id = (vlan_field >> 12) & 0x000F;                      \
-        uint16_t pkt_cnt = 0;                                                \
-        uint32_t debug_out = 0;                                              \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
@@ -516,10 +625,11 @@ do {                                                                         \
                                                                              \
          /* finished packet with LSO to handle */                            \
         for (;;) {                                                           \
-            pkt_cnt++;                                                       \
             /* read packet from nfd_in_issued_lso_ring */                    \
             lso_ring_get(lso_ring_num, lso_ring_addr, lso_xnum,              \
                          sizeof(lso_pkt), sig_done, &lso_sig_pair);          \
+                                                                             \
+            /* k_pace: here we wait for read to complete. Could insert queue poll here */ \
             wait_sig_mask(lso_wait_msk);                                     \
             __implicit_read(&lso_sig_pair.even);                             \
             __implicit_read(&wq_sig##_pkt);                                  \
@@ -624,11 +734,6 @@ do {                                                                         \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_LAST_PKT_FM_LSO_RING);      \
                                                                              \
-                /* pkt_cnt in first 16 bits, pacing_rate in other 16 bits */ \
-                debug_out = ((uint32_t)pkt_cnt << 16) |                      \
-                                     ((uint32_t)pacing_rate & 0x0000FFFF);   \
-                                                                             \
-                DEBUG((uint32_t)flow_id);                                    \
                 /* Break out of loop processing LSO ring */                  \
                 /* TODO how can we catch obvious MU ring corruption? */      \
                 break;                                                       \
@@ -638,7 +743,7 @@ do {                                                                         \
         /* Remove the wq signal from the wait mask */                        \
         /* XXX flag the wq_sig as written for live range tracking */         \
         wait_msk &= ~__signals(&wq_sig##_pkt);                               \
-        __implicit_write(&wq_sig##_pkt);                                     \
+        __implicit_write(&wq_sig##_pkt);  /* TODO: update flag handling */   \
     }                                                                        \
 } while (0)
 
@@ -665,10 +770,7 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int qc_queue;
     unsigned int num_avail;
 
-    unsigned int out_msg_sz = sizeof(struct nfd_in_pkt_desc);
-
     __xread struct _issued_pkt_batch batch_in;
-    struct _pkt_desc_batch batch_tmp;
     struct nfd_in_pkt_desc pkt_desc_tmp;
 
     /* Reorder before potentially issuing a ring get */
