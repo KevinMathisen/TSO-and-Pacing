@@ -313,17 +313,6 @@ dequeue_pacing_queue() {
         dequeue_batch_size = (len_queue < 8) ? len_queue : 8;
         len_queue -= dequeue_batch_size;
 
-        /* do ADD_SEQN_PREP (point csr to seqn for this queue) */
-        /* TODO: might be redundant when also LM for desc. However could use this to make desc read more efficient. */
-        /*       Could also prewrite seqnm to GPR */
-        local_csr_write(
-            local_csr_active_lm_addr_3,
-            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(pacing_queue[head_queue].__raw[0])]);
-
-        /* get QC queue for batch */
-        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(pacing_queue[head_queue].q_num),
-                               NFD_IN_TX_QUEUE);
-
         /* Place packets in xfer out, add to work queue */
         /* Add packets we process to wait mask, and use this signal */
         if (dequeue_batch_size >= 1)
@@ -357,12 +346,6 @@ dequeue_pacing_queue() {
             _DEQUEUE_PROC(7);
         }
 
-        wait_for_all(&qc_sig);
-        __implicit_read(&qc_sig);
-
-        /* Increment the TX_R pointer for this queue by dequeue_batch_size */
-        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, dequeue_batch_size,
-                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
     }
 }
 
@@ -849,7 +832,7 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* Map batch.queue to a QC queue and increment the TX_R pointer
          * for that queue by n_batch */
-        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(0),
+        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
@@ -882,7 +865,7 @@ _notify(__shared __gpr unsigned int *complete,
          * signals that will not be set while processing a partial
          * batch and store batch info. */
         n_batch = batch_in.pkt0.num_batch;
-        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(0),
+        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
         wait_msk = __signals(&msg_sig0, &wq_sig0);
 
