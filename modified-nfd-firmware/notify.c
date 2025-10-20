@@ -269,7 +269,7 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 #define PACING_QUEUE_SIZE 80
 
 /* k_pace: declare packet size as shared gpr */
-__shared __gpr unsigned int out_msg_sz = sizeof(struct nfd_in_pkt_desc);
+__shared __gpr unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
 
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PACING_QUEUE_SIZE];
@@ -293,7 +293,7 @@ do {                                                                    \
                                                                         \
     _SET_DST_Q(_pkt);                                                   \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
-                            out_msg_sz, out_msg_sz, sig_done,           \
+                            out_msg_sz_2, out_msg_sz_2, sig_done,           \
                             &wq_sig##_pkt);                             \
                                                                         \
 } while (0)
@@ -748,6 +748,8 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int n_batch;
     unsigned int qc_queue;
     unsigned int num_avail;
+
+    unsigned int out_msg_sz = sizeof(struct nfd_in_pkt_desc);
 
     __xread struct _issued_pkt_batch batch_in;
     struct nfd_in_pkt_desc pkt_desc_tmp;
