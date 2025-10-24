@@ -217,18 +217,20 @@ do {                                                                    \
 
 #define NFD_IN_SEQN_PTR *l$index3
 
-/* Add sequence numbers, using a shared GPR to store */
-static __shared __gpr unsigned int dst_q_seqn = 0;
+/* Add sequence numbers, using a LM to store */
+static __shared __lmem unsigned int seq_nums[NFD_IN_NUM_SEQRS];
 
-/* No prep required for a single sequencer */
 #define NFD_IN_ADD_SEQN_PREP                                            \
 do {                                                                    \
+    local_csr_write(                                                    \
+        local_csr_active_lm_addr_3,                                     \
+        (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(batch_in.pkt0.__raw[0])]); \
 } while (0)
 
 #define NFD_IN_ADD_SEQN_PROC                                            \
 do {                                                                    \
-    pkt_desc_tmp.seq_num = dst_q_seqn;                                  \
-    dst_q_seqn++;                                                       \
+    __asm { ld_field[pkt_desc_tmp.__raw[0], 6, NFD_IN_SEQN_PTR, <<8] }  \
+    __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
 } while (0)
 
 #endif /* (NFD_IN_NUM_SEQRS == 1) */
