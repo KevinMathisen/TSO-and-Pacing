@@ -600,32 +600,7 @@ do {                                                                         \
         tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;                       \
         len_queue++;                                                         \
         DEBUG(len_queue);                                                    \
-                                                                            \
-        /* ======= Read from local memory ============================== */ \
-                                                                            \
-        raw0_buff = pacing_queue[head_queue].__raw[0];                      \
-                                                                            \
-        /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
-        local_csr_write(local_csr_active_lm_addr_3,                         \
-            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);  \
-                                                                            \
-        /* Set seqn of packet, then increase counter */                     \
-        __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }  \
-        __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
-                                                                            \
-        batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
-        batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
-        batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
-        batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
-                                                                            \
-        head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
-        len_queue--;                                                        \
-                                                                            \
                                                                              \
-        _SET_DST_Q(_pkt);                                                    \
-        __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,          \
-                             out_msg_sz, out_msg_sz, sig_done,               \
-                             &wq_sig##_pkt);                                 \
     } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
         /* else LSO packets */                                               \
         __gpr struct nfd_in_lso_desc lso_pkt;                                \
@@ -730,32 +705,6 @@ do {                                                                         \
                 len_queue++;                                                 \
                 DEBUG(len_queue);                                            \
                                                                              \
-                /* ======= Read from local memory ============================== */ \
-                                                                                    \
-                raw0_buff = pacing_queue[head_queue].__raw[0];                      \
-                                                                                    \
-                /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
-                local_csr_write(local_csr_active_lm_addr_3,                         \
-                    (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);              \
-                                                                                    \
-                /* Set seqn of packet, then increase counter */                     \
-                __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }              \
-                __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
-                                                                                    \
-                batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
-                batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
-                batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
-                batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
-                                                                                    \
-                head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
-                len_queue--;                                                        \
-                                                                                    \
-                _SET_DST_Q(_pkt);                                            \
-                                                                             \
-                __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
-                                     out_msg_sz, out_msg_sz,                 \
-                                     sig_done, &wq_sig##_pkt);               \
-                lso_wait_msk |= __signals(&wq_sig##_pkt);                    \
                                                                              \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_ALL_LSO_PKTS_TO_ME_WQ);     \
@@ -916,6 +865,8 @@ _notify(__shared __gpr unsigned int *complete,
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
+        dequeue_pacing_queue();
+
     } else if (num_avail > 0) {
         /* There is a partial batch - process messages one at a time. */
         unsigned int partial_served = 0;
@@ -1017,6 +968,8 @@ _notify(__shared __gpr unsigned int *complete,
         /* Increment the TX_R pointer for this queue by n_batch */
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+
+        dequeue_pacing_queue();
 
     } else {
         /* Participate in ctm_ring_get ordering */
