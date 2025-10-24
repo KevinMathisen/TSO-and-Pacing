@@ -602,15 +602,17 @@ do {                                                                         \
                                                                             \
         /* ======= Read from local memory ============================== */ \
                                                                             \
+        raw0_buff = pacing_queue[head_queue].__raw[0];                      \
+                                                                            \
         /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
         local_csr_write(local_csr_active_lm_addr_3,                         \
-            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(pacing_queue[head_queue].__raw[0])]);  \
+            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);  \
                                                                             \
         /* Set seqn of packet, then increase counter */                     \
-        __asm { ld_field[pacing_queue[head_queue].__raw[0], 6, NFD_IN_SEQN_PTR, <<8] }  \
+        __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }  \
         __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
                                                                             \
-        batch_out.pkt##_pkt##.__raw[0] = pacing_queue[head_queue].__raw[0]; \
+        batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
         batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
         batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
         batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
@@ -729,15 +731,17 @@ do {                                                                         \
                                                                              \
                 /* ======= Read from local memory ============================== */ \
                                                                                     \
+                raw0_buff = pacing_queue[head_queue].__raw[0];                      \
+                                                                                    \
                 /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
                 local_csr_write(local_csr_active_lm_addr_3,                         \
-                    (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(pacing_queue[head_queue].__raw[0])]);  \
+                    (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);              \
                                                                                     \
                 /* Set seqn of packet, then increase counter */                     \
-                __asm { ld_field[pacing_queue[head_queue].__raw[0], 6, NFD_IN_SEQN_PTR, <<8] }  \
+                __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }              \
                 __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
                                                                                     \
-                batch_out.pkt##_pkt##.__raw[0] = pacing_queue[head_queue].__raw[0]; \
+                batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
                 batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
                 batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
                 batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
@@ -824,6 +828,8 @@ _notify(__shared __gpr unsigned int *complete,
 
     __xread struct _issued_pkt_batch batch_in;
     struct nfd_in_pkt_desc pkt_desc_tmp;
+
+    __gpr uint32_t raw0_buff;
 
     /* Reorder before potentially issuing a ring get */
     wait_for_all(&get_order_sig);
