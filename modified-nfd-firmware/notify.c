@@ -579,12 +579,45 @@ do {                                                                         \
         _NOTIFY_MU_CHK(_pkt);                                                \
         pkt_desc_tmp.is_nfd = batch_in.pkt##_pkt##.eop;                      \
         pkt_desc_tmp.offset = batch_in.pkt##_pkt##.offset;                   \
-        NFD_IN_ADD_SEQN_PROC;                                                \
-        batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];              \
-        batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |    \
-                                          notify_reset_state_gpr);           \
-        batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];      \
-        batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];      \
+                                                                             \
+        /* ======= Write to local memory ======================== */         \
+                                                                             \
+        /* Stall if queue full */                                            \
+        if (len_queue >= PACING_QUEUE_SIZE-1) {                              \
+            while(1) { DEBUG(0xAAAA); }                                      \
+        }                                                                    \
+                                                                             \
+        /* Place packet in next available slot in pacing queue */            \
+        pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];           \
+        pacing_queue[tail_queue].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] | \
+                                            notify_reset_state_gpr);         \
+        pacing_queue[tail_queue].__raw[2] = batch_in.pkt##_pkt##.__raw[2];   \
+        /* k_pace: Zero vlan / l3_offset */                                  \
+        pacing_queue[tail_queue].__raw[3] = batch_in.pkt##_pkt##.__raw[3]; & \
+                                            0xFFFF0000;                      \
+                                                                             \
+        tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;                       \
+        len_queue++;                                                         \
+        DEBUG(len_queue);                                                    \
+                                                                            \
+        /* ======= Read from local memory ============================== */ \
+                                                                            \
+        /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
+        local_csr_write(local_csr_active_lm_addr_3,                         \
+            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(pacing_queue[head_queue].__raw[0])]);  \
+                                                                            \
+        /* Set seqn of packet, then increase counter */                     \
+        __asm { ld_field[pacing_queue[head_queue].__raw[0], 6, NFD_IN_SEQN_PTR, <<8] }  \
+        __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
+                                                                            \
+        batch_out.pkt##_pkt##.__raw[0] = pacing_queue[head_queue].__raw[0]; \
+        batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
+        batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
+        batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
+                                                                            \
+        head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
+        len_queue--;                                                        \
+                                                                            \
                                                                              \
         _SET_DST_Q(_pkt);                                                    \
         __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,          \
@@ -673,16 +706,45 @@ do {                                                                         \
                                                                              \
                 pkt_desc_tmp.is_nfd = lso_pkt.desc.eop;                      \
                 pkt_desc_tmp.offset = lso_pkt.desc.offset;                   \
-                NFD_IN_ADD_SEQN_PROC;                                        \
-                batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];      \
-                batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1] |    \
-                                                  notify_reset_state_gpr);   \
-                batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];      \
-                /* k_pace: Zero vlan / l3_offset */                          \
-                raw3 = lso_pkt.desc.__raw[3];                                \
-                raw3 &= 0xFFFF0000;                                          \
-                batch_out.pkt##_pkt##.__raw[3] = raw3;                       \
                                                                              \
+                /* ======= Write to local memory ======================== */ \
+                                                                             \
+                /* Stall if queue full */                                    \
+                if (len_queue >= PACING_QUEUE_SIZE-1) {                      \
+                    while(1) { DEBUG(0xAAAA); }                              \
+                }                                                            \
+                                                                             \
+                /* Place packet in next available slot in pacing queue */    \
+                pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];   \
+                pacing_queue[tail_queue].__raw[1] = (lso_pkt.desc.__raw[1] | \
+                                                    notify_reset_state_gpr); \
+                pacing_queue[tail_queue].__raw[2] = lso_pkt.desc.__raw[2];   \
+                /* k_pace: Zero vlan / l3_offset */                          \
+                pacing_queue[tail_queue].__raw[3] = lso_pkt.desc.__raw[3] &  \
+                                                    0xFFFF0000;              \
+                                                                             \
+                tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;               \
+                len_queue++;                                                 \
+                DEBUG(len_queue);                                            \
+                                                                             \
+                /* ======= Read from local memory ============================== */ \
+                                                                                    \
+                /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
+                local_csr_write(local_csr_active_lm_addr_3,                         \
+                    (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(pacing_queue[head_queue].__raw[0])]);  \
+                                                                                    \
+                /* Set seqn of packet, then increase counter */                     \
+                __asm { ld_field[pacing_queue[head_queue].__raw[0], 6, NFD_IN_SEQN_PTR, <<8] }  \
+                __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
+                                                                                    \
+                batch_out.pkt##_pkt##.__raw[0] = pacing_queue[head_queue].__raw[0]; \
+                batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
+                batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
+                batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
+                                                                                    \
+                head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
+                len_queue--;                                                        \
+                                                                                    \
                 _SET_DST_Q(_pkt);                                            \
                                                                              \
                 __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
@@ -822,7 +884,6 @@ _notify(__shared __gpr unsigned int *complete,
         pkt_desc_tmp.intf = PCIE_ISL;
         pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
 #ifdef NFD_IN_ADD_SEQN
-        NFD_IN_ADD_SEQN_PREP;
 #else
         pkt_desc_tmp.seq_num = 0;
 #endif
@@ -884,7 +945,6 @@ _notify(__shared __gpr unsigned int *complete,
         pkt_desc_tmp.intf = PCIE_ISL;
         pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
 #ifdef NFD_IN_ADD_SEQN
-        NFD_IN_ADD_SEQN_PREP;
 #else
         pkt_desc_tmp.seq_num = 0;
 #endif
