@@ -820,7 +820,7 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* Interface and queue info are the same for all packets in batch */
         pkt_desc_tmp.intf = PCIE_ISL;
-        pkt_desc_tmp.q_num = 0;
+        pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
 #ifdef NFD_IN_ADD_SEQN
         NFD_IN_ADD_SEQN_PREP;
 #else
@@ -882,7 +882,7 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* Interface and queue info is the same for all packets in batch */
         pkt_desc_tmp.intf = PCIE_ISL;
-        pkt_desc_tmp.q_num = 0;
+        pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
 #ifdef NFD_IN_ADD_SEQN
         NFD_IN_ADD_SEQN_PREP;
 #else
