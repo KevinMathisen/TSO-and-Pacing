@@ -271,7 +271,7 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 #define PACING_QUEUE_SIZE 80
 
 /* k_pace: declare packet size as shared gpr */
-__shared __gpr unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
+/* __shared __gpr unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc); */
 
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PACING_QUEUE_SIZE];
@@ -281,7 +281,8 @@ __shared __gpr unsigned int len_queue = 0;
 
 #define _DEQUEUE_PROC(_pkt)                                             \
 do {                                                                    \
-    wait_for_all(&wq_sig##_pkt);                                        \
+    /* wait_for_all(&wq_sig##_pkt); */                                  \
+    /* TODO: modify wait signal to wait here, not in main loop */       \
                                                                         \
     raw0_buff = pacing_queue[head_queue].__raw[0];                      \
                                                                         \
@@ -302,7 +303,7 @@ do {                                                                    \
                                                                         \
     _SET_DST_Q(_pkt);                                                   \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
-                            out_msg_sz_2, out_msg_sz_2, sig_done,           \
+                            out_msg_sz_2, out_msg_sz_2, sig_done,       \
                             &wq_sig##_pkt);                             \
                                                                         \
 } while (0)
@@ -313,9 +314,9 @@ do {                                                                    \
  */
 __intrinsic void
 dequeue_pacing_queue() {
-    unsigned int qc_queue; /* May be used if we increment TX_R pointer here */
     unsigned int dequeue_batch_size;
     __gpr uint32_t raw0_buff;
+    unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
 
     if (len_queue) {
         /* Update queue size so no other workers will steal our work */
