@@ -281,8 +281,9 @@ __shared __gpr unsigned int len_queue = 0;
 
 #define _DEQUEUE_PROC(_pkt)                                             \
 do {                                                                    \
-    /* wait_for_all(&wq_sig##_pkt); */                                  \
-    /* TODO: modify wait signal to wait here, not in main loop */       \
+    /* Wait for batch_out._pkt to be available */                       \
+    wait_for_all(&wq_sig##_pkt);                                        \
+    __implicit_read(&wq_sig##_pkt);                                     \
                                                                         \
     raw0_buff = pacing_queue[head_queue].__raw[0];                      \
                                                                         \
@@ -725,11 +726,6 @@ do {                                                                         \
                                     lso_pkt.desc.__raw[0]);                  \
                     halt();                                                  \
                 }                                                            \
-                                                                             \
-                /* Remove the wq signal from the wait mask */                \
-                /* XXX flag the wq_sig as written for live range tracking */ \
-                wait_msk &= ~__signals(&wq_sig##_pkt);                       \
-                __implicit_write(&wq_sig##_pkt);                             \
             }                                                                \
                                                                              \
             /* if it is last LSO being read from ring */                     \
@@ -743,11 +739,6 @@ do {                                                                         \
                 break;                                                       \
             }                                                                \
         }                                                                    \
-    } else {                                                                 \
-        /* Remove the wq signal from the wait mask */                        \
-        /* XXX flag the wq_sig as written for live range tracking */         \
-        wait_msk &= ~__signals(&wq_sig##_pkt);                               \
-        __implicit_write(&wq_sig##_pkt);  /* TODO: update flag handling */   \
     }                                                                        \
 } while (0)
 
@@ -807,17 +798,7 @@ _notify(__shared __gpr unsigned int *complete,
             alu[*served, *served, +, NFD_IN_MAX_BATCH_SZ];
         }
 
-        wait_msk = __signals(&wq_sig0, &wq_sig1, &wq_sig2, &wq_sig3,
-                             &wq_sig4, &wq_sig5, &wq_sig6, &wq_sig7,
-                             &qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
-        __implicit_read(&wq_sig0);
-        __implicit_read(&wq_sig1);
-        __implicit_read(&wq_sig2);
-        __implicit_read(&wq_sig3);
-        __implicit_read(&wq_sig4);
-        __implicit_read(&wq_sig5);
-        __implicit_read(&wq_sig6);
-        __implicit_read(&wq_sig7);
+        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
@@ -878,14 +859,6 @@ _notify(__shared __gpr unsigned int *complete,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
         wait_sig_mask(wait_msk);
-        __implicit_read(&wq_sig0);
-        __implicit_read(&wq_sig1);
-        __implicit_read(&wq_sig2);
-        __implicit_read(&wq_sig3);
-        __implicit_read(&wq_sig4);
-        __implicit_read(&wq_sig5);
-        __implicit_read(&wq_sig6);
-        __implicit_read(&wq_sig7);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_order_sig);
@@ -897,7 +870,7 @@ _notify(__shared __gpr unsigned int *complete,
         n_batch = batch_in.pkt0.num_batch;
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
-        wait_msk = __signals(&msg_sig0, &wq_sig0);
+        wait_msk = __signals(&msg_sig0);
 
         /* Interface and queue info is the same for all packets in batch */
         pkt_desc_tmp.intf = PCIE_ISL;
@@ -935,9 +908,7 @@ _notify(__shared __gpr unsigned int *complete,
             }
 
             wait_sig_mask(wait_msk);
-            __implicit_read(&wq_sig0);
             __implicit_read(&msg_sig0);
-            wait_msk |= __signals(&wq_sig0);
         }
 
         /* We have finished fetching the messages from the ring.
@@ -948,13 +919,12 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* Wait for the last get to complete */
         wait_sig_mask(wait_msk);
-        __implicit_read(&wq_sig0);
         __implicit_read(&msg_sig0);
 
         /* Set up wait_msk to process a full batch next */
         /* XXX Assume we will do a WQ put, _NOTIFY_PROC will clear
            wq_sig0 if necessary */
-        wait_msk = __signals(&wq_sig0, &msg_sig0, &msg_sig1, &qc_sig,
+        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig,
                              &msg_order_sig);
 
         /* Process the final descriptor from the batch */
