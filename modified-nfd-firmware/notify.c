@@ -593,7 +593,7 @@ do {                                                                         \
                                             notify_reset_state_gpr);         \
         pacing_queue[tail_queue].__raw[2] = batch_in.pkt##_pkt##.__raw[2];   \
         /* k_pace: Zero vlan / l3_offset */                                  \
-        pacing_queue[tail_queue].__raw[3] = batch_in.pkt##_pkt##.__raw[3]; & \
+        pacing_queue[tail_queue].__raw[3] = batch_in.pkt##_pkt##.__raw[3] & \
                                             0xFFFF0000;                      \
                                                                              \
         tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;                       \
