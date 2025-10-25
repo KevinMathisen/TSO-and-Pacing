@@ -855,11 +855,6 @@ _notify(__shared __gpr unsigned int *complete,
         _NOTIFY_PROC(6);
         _NOTIFY_PROC(7);
 
-        /* Allow the next context taking a message to go.
-         * We have finished _NOTIFY_PROC() where we need to
-         * lock out other threads. */
-        reorder_done_opt(&next_ctx, &msg_order_sig);
-
         /* Map batch.queue to a QC queue and increment the TX_R pointer
          * for that queue by n_batch */
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
@@ -868,6 +863,11 @@ _notify(__shared __gpr unsigned int *complete,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
         dequeue_pacing_queue();
+
+        /* Allow the next context taking a message to go.
+            * We have finished _NOTIFY_PROC() where we need to
+            * lock out other threads. */
+        reorder_done_opt(&next_ctx, &msg_order_sig);
 
     } else if (num_avail > 0) {
         /* There is a partial batch - process messages one at a time. */
@@ -951,16 +951,16 @@ _notify(__shared __gpr unsigned int *complete,
         /* Process the final descriptor from the batch */
         _NOTIFY_PROC(0);
 
-        /* Allow the next context taking a message to go.
-         * We have finished _NOTIFY_PROC() where we need to
-         * lock out other threads. */
-        reorder_done_opt(&next_ctx, &msg_order_sig);
-
         /* Increment the TX_R pointer for this queue by n_batch */
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
         dequeue_pacing_queue();
+        
+        /* Allow the next context taking a message to go.
+            * We have finished _NOTIFY_PROC() where we need to
+            * lock out other threads. */
+        reorder_done_opt(&next_ctx, &msg_order_sig);
 
     } else {
         /* Participate in ctm_ring_get ordering */
