@@ -360,6 +360,17 @@ dequeue_pacing_queue() {
     }
 }
 
+__intrinsic void
+raise_signal(SIGNAL *sig)
+{
+    unsigned int val, ctx;
+    ctx = ctx();
+    val = NFP_MECSR_SAME_ME_SIGNAL_SIG_NO(__signal_number(sig)) |
+            NFP_MECSR_SAME_ME_SIGNAL_CTX(ctx);
+    local_csr_write(local_csr_same_me_signal, val);
+    __implicit_write(sig);
+}
+
 /* -------------------- k_pace: Debug ------------------------------------------- */
 __export __emem uint32_t wire_debug[1024*1024];
 __export __emem uint32_t wire_debug_idx;
@@ -537,6 +548,16 @@ notify_setup(int side)
         lso_ring_addr = ((((unsigned long long)
                            NFD_EMEM_LINK(PCIE_ISL)) >> 32) << 24);
     }
+
+    /* k_pace: raise all work queue signals to indicate xwrites are available */
+    raise_signal(&wq_sig0);
+    raise_signal(&wq_sig1);
+    raise_signal(&wq_sig2);
+    raise_signal(&wq_sig3);
+    raise_signal(&wq_sig4);
+    raise_signal(&wq_sig5);
+    raise_signal(&wq_sig6);
+    raise_signal(&wq_sig7);
 }
 
 #ifndef NFD_MU_PTR_DBG_MSK
