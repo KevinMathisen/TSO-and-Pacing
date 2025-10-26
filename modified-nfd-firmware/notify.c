@@ -299,7 +299,8 @@ do {                                                                    \
     batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
     batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
                                                                         \
-    head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
+    head_queue++;                                                       \
+    if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;                \
                                                                         \
     _SET_DST_Q(_pkt);                                                   \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
