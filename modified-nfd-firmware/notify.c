@@ -267,7 +267,7 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 /* -------- k_pace: constants/shared variables -------- */
 /* ========================================================================================*/
 
-#define PACING_QUEUE_SIZE 80
+#define PACING_QUEUE_SIZE 192
 
 /* k_pace: declare packet size as shared gpr */
 /* __shared __gpr unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc); */
@@ -384,8 +384,8 @@ __shared __gpr uint32_t debug_calls = 0;
  * (We print 800th to 1000th tso burst)
 */
 #define DEBUG(_a) do { \
-    if (debug_index < 50) { \
-        if (debug_calls >= 1) { \
+    if (debug_index < 200) { \
+        if (debug_calls >= 50) { \
             SIGNAL debug_sig;    \
             batch_out.pkt7.__raw[3] = _a; \
             __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
@@ -858,6 +858,7 @@ _notify(__shared __gpr unsigned int *complete,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
         dequeue_pacing_queue();
+        while (len_queue > PACING_QUEUE_SIZE-30) dequeue_pacing_queue();
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
@@ -951,6 +952,7 @@ _notify(__shared __gpr unsigned int *complete,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
         dequeue_pacing_queue();
+        while (len_queue > PACING_QUEUE_SIZE-30) dequeue_pacing_queue();
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
