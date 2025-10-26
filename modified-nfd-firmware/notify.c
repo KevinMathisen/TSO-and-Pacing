@@ -612,13 +612,13 @@ do {                                                                         \
         /* ======= Read from local memory ============================== */  \
                                                                              \
                                                                              \
-        raw0_buff = pacing_queue[0].__raw[0];                                \
+        raw0_buff = pacing_queue[head_queue].__raw[0];                                \
                                                                              \
                                                                              \
         batch_out_pkt_dummy.__raw[0] = raw0_buff;                            \
-        batch_out_pkt_dummy.__raw[1] = pacing_queue[0].__raw[1];             \
-        batch_out_pkt_dummy.__raw[2] = pacing_queue[0].__raw[2];             \
-        batch_out_pkt_dummy.__raw[3] = pacing_queue[0].__raw[3];             \
+        batch_out_pkt_dummy.__raw[1] = pacing_queue[head_queue].__raw[1];             \
+        batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];             \
+        batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];             \
                                                                              \
         head_queue++;                                                        \
         if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;                 \
@@ -737,13 +737,13 @@ do {                                                                         \
                                                                              \
                 /* ======= Read from local memory ====================== */  \
                                                                              \
-                raw0_buff = pacing_queue[0].__raw[0];                        \
+                raw0_buff = pacing_queue[head_queue].__raw[0];                        \
                                                                              \
                                                                              \
                 batch_out_pkt_dummy.__raw[0] = raw0_buff;                    \
-                batch_out_pkt_dummy.__raw[1] = pacing_queue[0].__raw[1];     \
-                batch_out_pkt_dummy.__raw[2] = pacing_queue[0].__raw[2];     \
-                batch_out_pkt_dummy.__raw[3] = pacing_queue[0].__raw[3];     \
+                batch_out_pkt_dummy.__raw[1] = pacing_queue[head_queue].__raw[1];     \
+                batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];     \
+                batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];     \
                                                                              \
                 head_queue++;                                                \
                 if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;         \
