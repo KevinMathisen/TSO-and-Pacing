@@ -277,6 +277,7 @@ __shared __lmem struct nfd_in_pkt_desc pacing_queue[PACING_QUEUE_SIZE];
 __shared __gpr unsigned int head_queue = 0;
 __shared __gpr unsigned int tail_queue = 0;
 __shared __gpr unsigned int len_queue = 0;
+_gpr struct nfd_in_pkt_desc batch_out_pkt_dummy;
 
 #define _DEQUEUE_PROC(_pkt)                                             \
 do {                                                                    \
@@ -593,6 +594,8 @@ do {                                                                         \
         pkt_desc_tmp.offset = batch_in.pkt##_pkt##.offset;                   \
         NFD_IN_ADD_SEQN_PROC;                                                \
                                                                              \
+        /* ======= Write to local memory ============================== */   \
+                                                                             \
         /* Place packet in next available slot in pacing queue */            \
         pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];           \
         pacing_queue[tail_queue].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] | \
@@ -603,9 +606,24 @@ do {                                                                         \
                                             0xFFFF0000;                      \
         len_queue++;                                                         \
         DEBUG(len_queue);                                                    \
-        len_queue--;                                                         \
                                                                              \
         tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;                       \
+                                                                             \
+        /* ======= Read from local memory ============================== */  \
+                                                                             \
+                                                                             \
+        raw0_buff = pacing_queue[head_queue].__raw[0];                       \
+                                                                             \
+                                                                             \
+        batch_out_pkt_dummy.__raw[0] = raw0_buff;                            \
+        batch_out_pkt_dummy.__raw[1] = pacing_queue[head_queue].__raw[1];    \
+        batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];    \
+        batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];    \
+                                                                             \
+        head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                       \
+        len_queue--;                                                         \
+                                                                             \
+        /* ============================================================= */  \
                                                                              \
         batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];              \
         batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |    \
@@ -700,6 +718,8 @@ do {                                                                         \
                 pkt_desc_tmp.offset = lso_pkt.desc.offset;                   \
                 NFD_IN_ADD_SEQN_PROC;                                        \
                                                                              \
+                /* ======= Write to local memory ====================== */   \
+                                                                             \
                 /* Place packet in next available slot in pacing queue */    \
                 pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];   \
                 pacing_queue[tail_queue].__raw[1] = (lso_pkt.desc.__raw[1] | \
@@ -712,8 +732,21 @@ do {                                                                         \
                 tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;               \
                 len_queue++;                                                 \
                 DEBUG(len_queue);                                            \
+                                                                             \
+                /* ======= Read from local memory ====================== */  \
+                                                                             \
+                raw0_buff = pacing_queue[head_queue].__raw[0];               \
+                                                                             \
+                                                                             \
+                batch_out_pkt_dummy.__raw[0] = raw0_buff;                           \
+                batch_out_pkt_dummy.__raw[1] = pacing_queue[head_queue].__raw[1];   \
+                batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];   \
+                batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];   \
+                                                                             \
+                head_queue = (head_queue+1)%PACING_QUEUE_SIZE;               \
                 len_queue--;                                                 \
                                                                              \
+                /* ===================================================== */  \
                                                                              \
                 batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];      \
                 batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1] |    \
