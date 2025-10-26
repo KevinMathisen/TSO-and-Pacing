@@ -591,7 +591,6 @@ do {                                                                         \
         _NOTIFY_MU_CHK(_pkt);                                                \
         pkt_desc_tmp.is_nfd = batch_in.pkt##_pkt##.eop;                      \
         pkt_desc_tmp.offset = batch_in.pkt##_pkt##.offset;                   \
-        NFD_IN_ADD_SEQN_PROC;                                                \
                                                                              \
         /* ======= Write to local memory ============================== */   \
                                                                              \
@@ -619,6 +618,13 @@ do {                                                                         \
                                                                              \
         raw0_buff = pacing_queue[head_queue].__raw[0];                       \
                                                                              \
+        /* Point csr addr 3 (seqn_ptr) to correct queue */                   \
+        local_csr_write(local_csr_active_lm_addr_3,                          \
+            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);               \
+                                                                             \
+        /* Set seqn of packet, then increase counter */                      \
+        __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }               \
+        __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }                \
                                                                              \
         batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                          \
         batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1];  \
@@ -717,7 +723,6 @@ do {                                                                         \
                                                                              \
                 pkt_desc_tmp.is_nfd = lso_pkt.desc.eop;                      \
                 pkt_desc_tmp.offset = lso_pkt.desc.offset;                   \
-                NFD_IN_ADD_SEQN_PROC;                                        \
                                                                              \
                 /* ======= Write to local memory ====================== */   \
                                                                              \
@@ -744,6 +749,13 @@ do {                                                                         \
                                                                              \
                 raw0_buff = pacing_queue[head_queue].__raw[0];               \
                                                                              \
+                /* Point csr addr 3 (seqn_ptr) to correct queue */           \
+                local_csr_write(local_csr_active_lm_addr_3,                  \
+                    (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);       \
+                                                                             \
+                /* Set seqn of packet, then increase counter */              \
+                __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }       \
+                __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }        \
                                                                              \
                 batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                          \
                 batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1];  \
