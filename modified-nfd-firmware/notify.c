@@ -383,7 +383,7 @@ __shared __gpr uint32_t debug_calls = 0;
  * (We print 800th to 1000th tso burst)
 */
 #define DEBUG(_a) do { \
-    if (debug_index < 200) { \
+    if (debug_index < 50) { \
         if (debug_calls >= 1) { \
             SIGNAL debug_sig;    \
             batch_out.pkt7.__raw[3] = _a; \
@@ -601,6 +601,9 @@ do {                                                                         \
         /* k_pace: Zero vlan / l3_offset */                                  \
         pacing_queue[tail_queue].__raw[3] = batch_in.pkt##_pkt##.__raw[3] &  \
                                             0xFFFF0000;                      \
+        len_queue++;                                                         \
+        DEBUG(len_queue);                                                    \
+        len_queue--;                                                         \
                                                                              \
         tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;                       \
                                                                              \
@@ -608,7 +611,8 @@ do {                                                                         \
         batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |    \
                                           notify_reset_state_gpr);           \
         batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];      \
-        batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];      \
+        batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3] &     \
+                                            0xFFFF0000;                      \
                                                                              \
         _SET_DST_Q(_pkt);                                                    \
         __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,          \
@@ -706,12 +710,17 @@ do {                                                                         \
                                                     0xFFFF0000;              \
                                                                              \
                 tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;               \
+                len_queue++;                                                 \
+                DEBUG(len_queue);                                            \
+                len_queue--;                                                 \
+                                                                             \
                                                                              \
                 batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];      \
                 batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1] |    \
                                                   notify_reset_state_gpr);   \
                 batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];      \
-                batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3];      \
+                batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3] &     \
+                                                    0xFFFF0000;              \
                 _SET_DST_Q(_pkt);                                            \
                                                                              \
                 __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
