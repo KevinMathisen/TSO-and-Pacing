@@ -548,6 +548,15 @@ notify_setup(int side)
         lso_ring_addr = ((((unsigned long long)
                            NFD_EMEM_LINK(PCIE_ISL)) >> 32) << 24);
     }
+
+    raise_signal(&wq_sig0);
+    raise_signal(&wq_sig1);
+    raise_signal(&wq_sig2);
+    raise_signal(&wq_sig3);
+    raise_signal(&wq_sig4);
+    raise_signal(&wq_sig5);
+    raise_signal(&wq_sig6);
+    raise_signal(&wq_sig7);
 }
 
 #ifndef NFD_MU_PTR_DBG_MSK
@@ -614,36 +623,6 @@ do {                                                                         \
         tail_queue++;                                                        \
         if (tail_queue >= PACING_QUEUE_SIZE) tail_queue = 0;                 \
                                                                              \
-        /* ======= Read from local memory ============================== */  \
-                                                                             \
-                                                                             \
-        raw0_buff = pacing_queue[head_queue].__raw[0];                       \
-                                                                             \
-        /* Point csr addr 3 (seqn_ptr) to correct queue */                   \
-        local_csr_write(local_csr_active_lm_addr_3,                          \
-            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);               \
-                                                                             \
-        /* Set seqn of packet, then increase counter */                      \
-        __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }               \
-        __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }                \
-                                                                             \
-        batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                          \
-        batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1];  \
-        batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2];  \
-        batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3] & \
-                                            0xFFFF0000;                      \
-                                                                             \
-        head_queue++;                                                        \
-        if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;                 \
-        len_queue--;                                                         \
-                                                                             \
-        /* ============================================================= */  \
-                                                                             \
-                                                                             \
-        _SET_DST_Q(_pkt);                                                    \
-        __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,          \
-                             out_msg_sz, out_msg_sz, sig_done,               \
-                             &wq_sig##_pkt);                                 \
     } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
         /* else LSO packets */                                               \
         __gpr struct nfd_in_lso_desc lso_pkt;                                \
@@ -671,7 +650,6 @@ do {                                                                         \
                          sizeof(lso_pkt), sig_done, &lso_sig_pair);          \
             wait_sig_mask(lso_wait_msk);                                     \
             __implicit_read(&lso_sig_pair.even);                             \
-            __implicit_read(&wq_sig##_pkt);                                  \
             while (signal_test(&lso_sig_pair.odd)) {                         \
                 /* Ring get failed, retry */                                 \
                 lso_ring_get(lso_ring_num, lso_ring_addr, lso_xnum,          \
@@ -746,36 +724,6 @@ do {                                                                         \
                 len_queue++;                                                 \
                 DEBUG(len_queue);                                            \
                                                                              \
-                /* ======= Read from local memory ====================== */  \
-                                                                             \
-                raw0_buff = pacing_queue[head_queue].__raw[0];               \
-                                                                             \
-                /* Point csr addr 3 (seqn_ptr) to correct queue */           \
-                local_csr_write(local_csr_active_lm_addr_3,                  \
-                    (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);       \
-                                                                             \
-                /* Set seqn of packet, then increase counter */              \
-                __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }       \
-                __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }        \
-                                                                             \
-                batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                          \
-                batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1];  \
-                batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2];  \
-                batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3] & \
-                                                    0xFFFF0000;                      \
-                                                                             \
-                head_queue++;                                                \
-                if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;         \
-                len_queue--;                                                 \
-                                                                             \
-                /* ===================================================== */  \
-                _SET_DST_Q(_pkt);                                            \
-                                                                             \
-                __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
-                                     out_msg_sz, out_msg_sz,                 \
-                                     sig_done, &wq_sig##_pkt);               \
-                lso_wait_msk |= __signals(&wq_sig##_pkt);                    \
-                                                                             \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_ALL_LSO_PKTS_TO_ME_WQ);     \
                 if (lso_pkt.desc.lso_end) {                                  \
@@ -795,11 +743,6 @@ do {                                                                         \
                                     lso_pkt.desc.__raw[0]);                  \
                     halt();                                                  \
                 }                                                            \
-                                                                             \
-                /* Remove the wq signal from the wait mask */                \
-                /* XXX flag the wq_sig as written for live range tracking */ \
-                wait_msk &= ~__signals(&wq_sig##_pkt);                       \
-                __implicit_write(&wq_sig##_pkt);                             \
             }                                                                \
                                                                              \
             /* if it is last LSO being read from ring */                     \
@@ -813,11 +756,6 @@ do {                                                                         \
                 break;                                                       \
             }                                                                \
         }                                                                    \
-    } else {                                                                 \
-        /* Remove the wq signal from the wait mask */                        \
-        /* XXX flag the wq_sig as written for live range tracking */         \
-        wait_msk &= ~__signals(&wq_sig##_pkt);                               \
-        __implicit_write(&wq_sig##_pkt);                                     \
     }                                                                        \
 } while (0)
 
@@ -844,12 +782,9 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int qc_queue;
     unsigned int num_avail;
 
-    unsigned int out_msg_sz = sizeof(struct nfd_in_pkt_desc);
-
     __xread struct _issued_pkt_batch batch_in;
     struct _pkt_desc_batch batch_tmp;
     struct nfd_in_pkt_desc pkt_desc_tmp;
-    struct nfd_in_pkt_desc batch_out_pkt_dummy;
 
     __gpr uint32_t raw0_buff;
 
@@ -879,17 +814,7 @@ _notify(__shared __gpr unsigned int *complete,
             alu[*served, *served, +, NFD_IN_MAX_BATCH_SZ];
         }
 
-        wait_msk = __signals(&wq_sig0, &wq_sig1, &wq_sig2, &wq_sig3,
-                             &wq_sig4, &wq_sig5, &wq_sig6, &wq_sig7,
-                             &qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
-        __implicit_read(&wq_sig0);
-        __implicit_read(&wq_sig1);
-        __implicit_read(&wq_sig2);
-        __implicit_read(&wq_sig3);
-        __implicit_read(&wq_sig4);
-        __implicit_read(&wq_sig5);
-        __implicit_read(&wq_sig6);
-        __implicit_read(&wq_sig7);
+        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
@@ -912,7 +837,6 @@ _notify(__shared __gpr unsigned int *complete,
         pkt_desc_tmp.intf = PCIE_ISL;
         pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
 #ifdef NFD_IN_ADD_SEQN
-        NFD_IN_ADD_SEQN_PREP;
 #else
         pkt_desc_tmp.seq_num = 0;
 #endif
@@ -926,17 +850,19 @@ _notify(__shared __gpr unsigned int *complete,
         _NOTIFY_PROC(6);
         _NOTIFY_PROC(7);
 
-        /* Allow the next context taking a message to go.
-         * We have finished _NOTIFY_PROC() where we need to
-         * lock out other threads. */
-        reorder_done_opt(&next_ctx, &msg_order_sig);
-
         /* Map batch.queue to a QC queue and increment the TX_R pointer
          * for that queue by n_batch */
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+
+        dequeue_pacing_queue();
+
+        /* Allow the next context taking a message to go.
+         * We have finished _NOTIFY_PROC() where we need to
+         * lock out other threads. */
+        reorder_done_opt(&next_ctx, &msg_order_sig);
 
     } else if (num_avail > 0) {
         /* There is a partial batch - process messages one at a time. */
@@ -949,14 +875,6 @@ _notify(__shared __gpr unsigned int *complete,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
         wait_sig_mask(wait_msk);
-        __implicit_read(&wq_sig0);
-        __implicit_read(&wq_sig1);
-        __implicit_read(&wq_sig2);
-        __implicit_read(&wq_sig3);
-        __implicit_read(&wq_sig4);
-        __implicit_read(&wq_sig5);
-        __implicit_read(&wq_sig6);
-        __implicit_read(&wq_sig7);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_order_sig);
@@ -968,13 +886,12 @@ _notify(__shared __gpr unsigned int *complete,
         n_batch = batch_in.pkt0.num_batch;
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
-        wait_msk = __signals(&msg_sig0, &wq_sig0);
+        wait_msk = __signals(&msg_sig0);
 
         /* Interface and queue info is the same for all packets in batch */
         pkt_desc_tmp.intf = PCIE_ISL;
         pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
 #ifdef NFD_IN_ADD_SEQN
-        NFD_IN_ADD_SEQN_PREP;
 #else
         pkt_desc_tmp.seq_num = 0;
 #endif
@@ -1007,9 +924,7 @@ _notify(__shared __gpr unsigned int *complete,
             }
 
             wait_sig_mask(wait_msk);
-            __implicit_read(&wq_sig0);
             __implicit_read(&msg_sig0);
-            wait_msk |= __signals(&wq_sig0);
         }
 
         /* We have finished fetching the messages from the ring.
@@ -1020,26 +935,27 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* Wait for the last get to complete */
         wait_sig_mask(wait_msk);
-        __implicit_read(&wq_sig0);
         __implicit_read(&msg_sig0);
 
         /* Set up wait_msk to process a full batch next */
         /* XXX Assume we will do a WQ put, _NOTIFY_PROC will clear
            wq_sig0 if necessary */
-        wait_msk = __signals(&wq_sig0, &msg_sig0, &msg_sig1, &qc_sig,
+        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig,
                              &msg_order_sig);
 
         /* Process the final descriptor from the batch */
         _NOTIFY_PROC(0);
 
+        /* Increment the TX_R pointer for this queue by n_batch */
+        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
+                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+
+        dequeue_pacing_queue();
+
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
          * lock out other threads. */
         reorder_done_opt(&next_ctx, &msg_order_sig);
-
-        /* Increment the TX_R pointer for this queue by n_batch */
-        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
-                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
     } else {
         /* Participate in ctm_ring_get ordering */
