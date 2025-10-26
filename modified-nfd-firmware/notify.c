@@ -606,7 +606,6 @@ do {                                                                         \
         len_queue++;                                                         \
         DEBUG(len_queue);                                                    \
                                                                              \
-        tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;                       \
                                                                              \
         /* ======= Read from local memory ============================== */  \
                                                                              \
@@ -619,7 +618,6 @@ do {                                                                         \
         batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];    \
         batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];    \
                                                                              \
-        head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                       \
         len_queue--;                                                         \
                                                                              \
         /* ============================================================= */  \
@@ -728,7 +726,6 @@ do {                                                                         \
                 pacing_queue[tail_queue].__raw[3] = lso_pkt.desc.__raw[3] &  \
                                                     0xFFFF0000;              \
                                                                              \
-                tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;               \
                 len_queue++;                                                 \
                 DEBUG(len_queue);                                            \
                                                                              \
@@ -742,7 +739,6 @@ do {                                                                         \
                 batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];   \
                 batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];   \
                                                                              \
-                head_queue = (head_queue+1)%PACING_QUEUE_SIZE;               \
                 len_queue--;                                                 \
                                                                              \
                 /* ===================================================== */  \
