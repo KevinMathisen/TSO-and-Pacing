@@ -833,7 +833,7 @@ _notify(__shared __gpr unsigned int *complete,
     __xread struct _issued_pkt_batch batch_in;
     struct _pkt_desc_batch batch_tmp;
     struct nfd_in_pkt_desc pkt_desc_tmp;
-    _gpr struct nfd_in_pkt_desc batch_out_pkt_dummy;
+    struct nfd_in_pkt_desc batch_out_pkt_dummy;
 
     __gpr uint32_t raw0_buff;
 
