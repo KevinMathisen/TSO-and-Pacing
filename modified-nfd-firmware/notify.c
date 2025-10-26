@@ -595,6 +595,11 @@ do {                                                                         \
                                                                              \
         /* ======= Write to local memory ============================== */   \
                                                                              \
+        /* Stall if queue full */                                            \
+        if (len_queue >= PACING_QUEUE_SIZE-1) {                              \
+            while(1) { DEBUG(0xAAAA); }                                      \
+        }                                                                    \
+                                                                             \
         /* Place packet in next available slot in pacing queue */            \
         pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];           \
         pacing_queue[tail_queue].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] | \
@@ -612,13 +617,14 @@ do {                                                                         \
         /* ======= Read from local memory ============================== */  \
                                                                              \
                                                                              \
-        raw0_buff = pacing_queue[head_queue].__raw[0];                                \
+        raw0_buff = pacing_queue[head_queue].__raw[0];                       \
                                                                              \
                                                                              \
-        batch_out_pkt_dummy.__raw[0] = raw0_buff;                            \
-        batch_out_pkt_dummy.__raw[1] = pacing_queue[head_queue].__raw[1];             \
-        batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];             \
-        batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];             \
+        batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                          \
+        batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1];  \
+        batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2];  \
+        batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3] & \
+                                            0xFFFF0000;                      \
                                                                              \
         head_queue++;                                                        \
         if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;                 \
@@ -626,12 +632,6 @@ do {                                                                         \
                                                                              \
         /* ============================================================= */  \
                                                                              \
-        batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];              \
-        batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |    \
-                                          notify_reset_state_gpr);           \
-        batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];      \
-        batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3] &     \
-                                            0xFFFF0000;                      \
                                                                              \
         _SET_DST_Q(_pkt);                                                    \
         __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,          \
@@ -721,6 +721,11 @@ do {                                                                         \
                                                                              \
                 /* ======= Write to local memory ====================== */   \
                                                                              \
+                /* Stall if queue full */                                    \
+                if (len_queue >= PACING_QUEUE_SIZE-1) {                      \
+                    while(1) { DEBUG(0xAAAA); }                              \
+                }                                                            \
+                                                                             \
                 /* Place packet in next available slot in pacing queue */    \
                 pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];   \
                 pacing_queue[tail_queue].__raw[1] = (lso_pkt.desc.__raw[1] | \
@@ -737,26 +742,20 @@ do {                                                                         \
                                                                              \
                 /* ======= Read from local memory ====================== */  \
                                                                              \
-                raw0_buff = pacing_queue[head_queue].__raw[0];                        \
+                raw0_buff = pacing_queue[head_queue].__raw[0];               \
                                                                              \
                                                                              \
-                batch_out_pkt_dummy.__raw[0] = raw0_buff;                    \
-                batch_out_pkt_dummy.__raw[1] = pacing_queue[head_queue].__raw[1];     \
-                batch_out_pkt_dummy.__raw[2] = pacing_queue[head_queue].__raw[2];     \
-                batch_out_pkt_dummy.__raw[3] = pacing_queue[head_queue].__raw[3];     \
+                batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                          \
+                batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1];  \
+                batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2];  \
+                batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3] & \
+                                                    0xFFFF0000;                      \
                                                                              \
                 head_queue++;                                                \
                 if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;         \
                 len_queue--;                                                 \
                                                                              \
                 /* ===================================================== */  \
-                                                                             \
-                batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];      \
-                batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1] |    \
-                                                  notify_reset_state_gpr);   \
-                batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];      \
-                batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3] &     \
-                                                    0xFFFF0000;              \
                 _SET_DST_Q(_pkt);                                            \
                                                                              \
                 __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
