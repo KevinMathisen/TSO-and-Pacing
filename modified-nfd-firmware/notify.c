@@ -600,7 +600,8 @@ do {                                                                         \
         batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |    \
                                           notify_reset_state_gpr);           \
         batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];      \
-        batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];      \
+        batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3] &     \
+                                            0xFFFF0000;                      \
                                                                              \
         _SET_DST_Q(_pkt);                                                    \
         __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,          \
@@ -710,7 +711,8 @@ do {                                                                         \
                 batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1] |    \
                                                   notify_reset_state_gpr);   \
                 batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];      \
-                batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3];      \
+                batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3] &     \
+                                                    0xFFFF0000;              \
                 _SET_DST_Q(_pkt);                                            \
                                                                              \
                 __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
