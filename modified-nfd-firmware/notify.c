@@ -267,7 +267,7 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 /* -------- k_pace: constants/shared variables -------- */
 /* ========================================================================================*/
 
-#define PACING_QUEUE_SIZE 192
+#define PACING_QUEUE_SIZE 224
 
 /* k_pace: declare packet size as shared gpr */
 /* __shared __gpr unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc); */
@@ -618,7 +618,6 @@ do {                                                                         \
         pacing_queue[tail_queue].__raw[3] = batch_in.pkt##_pkt##.__raw[3] &  \
                                             0xFFFF0000;                      \
         len_queue++;                                                         \
-        DEBUG(len_queue);                                                    \
                                                                              \
         tail_queue++;                                                        \
         if (tail_queue >= PACING_QUEUE_SIZE) tail_queue = 0;                 \
@@ -722,7 +721,6 @@ do {                                                                         \
                 tail_queue++;                                                \
                 if (tail_queue >= PACING_QUEUE_SIZE) tail_queue = 0;         \
                 len_queue++;                                                 \
-                DEBUG(len_queue);                                            \
                                                                              \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_ALL_LSO_PKTS_TO_ME_WQ);     \
@@ -858,7 +856,7 @@ _notify(__shared __gpr unsigned int *complete,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
         dequeue_pacing_queue();
-        while (len_queue > PACING_QUEUE_SIZE-30) dequeue_pacing_queue();
+        while (len_queue > PACING_QUEUE_SIZE-64) dequeue_pacing_queue();
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
@@ -952,7 +950,7 @@ _notify(__shared __gpr unsigned int *complete,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
         dequeue_pacing_queue();
-        while (len_queue > PACING_QUEUE_SIZE-30) dequeue_pacing_queue();
+        while (len_queue > PACING_QUEUE_SIZE-64) dequeue_pacing_queue();
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
