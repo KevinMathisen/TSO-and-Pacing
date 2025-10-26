@@ -582,10 +582,6 @@ do {                                                                         \
                                                                              \
         /* ======= Write to local memory ======================== */         \
                                                                              \
-        /* Stall if queue full */                                            \
-        if (len_queue >= PACING_QUEUE_SIZE-1) {                              \
-            while(1) { DEBUG(0xAAAA); }                                      \
-        }                                                                    \
                                                                              \
         /* Place packet in next available slot in pacing queue */            \
         pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];           \
@@ -597,29 +593,14 @@ do {                                                                         \
                                             0xFFFF0000;                      \
                                                                              \
         tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;                       \
-        len_queue++;                                                         \
-        DEBUG(len_queue);                                                    \
                                                                             \
         /* ======= Read from local memory ============================== */ \
-                                                                            \
-        raw0_buff = pacing_queue[head_queue].__raw[0];                      \
-                                                                            \
-        /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
-        local_csr_write(local_csr_active_lm_addr_3,                         \
-            (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);  \
-                                                                            \
-        /* Set seqn of packet, then increase counter */                     \
-        __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }  \
-        __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
-                                                                            \
-        batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
-        batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
-        batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
-        batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
-                                                                            \
-        head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
-        len_queue--;                                                        \
-                                                                            \
+        NFD_IN_ADD_SEQN_PROC;                                                \
+        batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];              \
+        batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |    \
+                                          notify_reset_state_gpr);           \
+        batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];      \
+        batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];      \
                                                                              \
         _SET_DST_Q(_pkt);                                                    \
         __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,          \
@@ -711,10 +692,6 @@ do {                                                                         \
                                                                              \
                 /* ======= Write to local memory ======================== */ \
                                                                              \
-                /* Stall if queue full */                                    \
-                if (len_queue >= PACING_QUEUE_SIZE-1) {                      \
-                    while(1) { DEBUG(0xAAAA); }                              \
-                }                                                            \
                                                                              \
                 /* Place packet in next available slot in pacing queue */    \
                 pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];   \
@@ -726,29 +703,14 @@ do {                                                                         \
                                                     0xFFFF0000;              \
                                                                              \
                 tail_queue = (tail_queue+1)%PACING_QUEUE_SIZE;               \
-                len_queue++;                                                 \
-                DEBUG(len_queue);                                            \
                                                                              \
                 /* ======= Read from local memory ============================== */ \
-                                                                                    \
-                raw0_buff = pacing_queue[head_queue].__raw[0];                      \
-                                                                                    \
-                /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
-                local_csr_write(local_csr_active_lm_addr_3,                         \
-                    (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);              \
-                                                                                    \
-                /* Set seqn of packet, then increase counter */                     \
-                __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }              \
-                __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
-                                                                                    \
-                batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
-                batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
-                batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
-                batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
-                                                                                    \
-                head_queue = (head_queue+1)%PACING_QUEUE_SIZE;                      \
-                len_queue--;                                                        \
-                                                                                    \
+                NFD_IN_ADD_SEQN_PROC;                                        \
+                batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];      \
+                batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1] |    \
+                                                  notify_reset_state_gpr);   \
+                batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];      \
+                batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3];      \
                 _SET_DST_Q(_pkt);                                            \
                                                                              \
                 __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,  \
