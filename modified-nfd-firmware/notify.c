@@ -862,8 +862,9 @@ _notify(__shared __gpr unsigned int *complete,
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
-        dequeue_pacing_queue();
-        while (len_queue > PACING_QUEUE_SIZE-64) dequeue_pacing_queue();
+        do {
+            dequeue_pacing_queue();
+        } while (len_queue > PACING_QUEUE_SIZE-64);
 
     } else if (num_avail > 0) {
         /* There is a partial batch - process messages one at a time. */
@@ -958,8 +959,9 @@ _notify(__shared __gpr unsigned int *complete,
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
-        dequeue_pacing_queue();
-        while (len_queue > PACING_QUEUE_SIZE-64) dequeue_pacing_queue();
+        do {
+            dequeue_pacing_queue();
+        } while (len_queue > PACING_QUEUE_SIZE-64);
 
     } else {
         /* Participate in ctm_ring_get ordering */
