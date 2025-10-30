@@ -288,7 +288,7 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
  * 
  * Departure_time:    0000 0000 0001 1110 0010 0000 0011 1110   1101 0110 1001 1111 0100 1101 1010 1011     (8 479 703 562 143 147)
  *   64 bit
- *                                                              _____________OFFSET_MASK_______________     ( 0x0000FFFF )
+ *                    __________________________________OFFSET_MASK____________________________________     ( 0x00000000FFFFFFFF )
  * 
  * Offset:            ---- ---- ---- ---- ---- ---- ---- ----   ---- ---- ---- ---- 0100 1101 1010 1011     ( 17 835, which is within 57 344 ticks)
  *  32 bit                                                                              |
@@ -316,10 +316,12 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 #define PQ_SLOT_TICKS 256
 #define PQ_HORIZON_TICKS 256*224
 
-#define PQ_OFFSET_MASK 0x0000FFFF   /* Mask to apply to departure time to get offset within horizon */
-#define PQ_SLOT_SHIFT 8             /* How many bits to shift offset to get slot in queue */
+#define PQ_OFFSET_MASK 0x00000000FFFFFFFF   /* Mask to apply to departure time to get offset within horizon */
+#define PQ_SLOT_SHIFT 8                     /* How many bits to shift offset to get slot in queue */
 
 #define BITMASK_SIZE 7
+#define INDEX_TO_BITMASK_SHIFT 5            /* each bitmask 32 bits, so need to remove 5 first bits to get bitmask index  */
+#define INDEX_IN_BITMASK_MASK 0x0000001F;   /* ... and only keep first 5 to get index inside bitmask */
 
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_SIZE];
@@ -328,7 +330,7 @@ __shared __gpr unsigned int tail_queue = 0;
 __shared __gpr unsigned int len_queue = 0;
 
 /* k_pace: Bitmask */
-__shared __lmem uint32_t bitmask[BITMASK_SIZE];
+__shared __lmem uint32_t bitmasks[BITMASK_SIZE];
 
 /* k_pace: FlowID mapping and time */
 __shared __gpr uint64_t flows_prev_dep_time[8];
@@ -473,8 +475,65 @@ update_departure_time(unsigned int flow_id, uint64_t lastest_dep_time)
 __instrinsic uint32_t
 get_index_from_departure_time(uint64_t departure_time_in_ticks)
 {
-    
+    /* 1. Get offset */
+    uint32_t dep_time_offset = departure_time_in_ticks & PQ_OFFSET_MASK;
+    if (dep_time_offset >= PQ_HORIZON_TICKS) 
+        dep_time_offset = dep_time_offset - PQ_HORIZON_TICKS;
+
+    /* 2. Get slot */
+    return dep_time_offset << PQ_OFFSET_MASK;
 }
+
+__instrinsic uint32_t
+get_next_available_index(uint32_t pq_index)
+{
+    unsigned int bitmask_index, index_in_bitmask;
+    uint32_t bitmask;
+
+    bitmask_index = pq_index << INDEX_TO_BITMASK_SHIFT;
+    index_in_bitmask = pq_index && INDEX_IN_BITMASK_MASK;
+    bitmask = bitmasks[bitmask_index];
+
+    /* Read through bitmasks until we find an available slot or reach head */
+    while (bitmask_index + index_in_bitmask != head_queue) {
+        /* Read through all slots in one bitmask */
+        while(index_in_bitmask < 32) {
+            if (!(bitmask << index_in_bitmask))
+                return bitmask_index + index_in_bitmask;
+            index_in_bitmask++;
+        }
+        /* New bitmask to check */
+        index_in_bitmask = 0;
+        bitmask_index++;
+        if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;
+        bitmask = bitmasks[bitmask_index];
+    }
+
+    /* Found no slot! */
+    while(1) DEBUG(0xAAAA);
+}
+
+__instrinsic int
+is_packet_at_index(uint32_t index)
+{
+    return bitmasks[index << INDEX_TO_BITMASK_SHIFT] << 
+            (index && INDEX_IN_BITMASK_MASK);
+}
+
+__instrinsic void
+add_index_to_bitmasks(unsigned int index)
+{
+    uint32_t mask_with_index_set = 1u >> (index && INDEX_IN_BITMASK_MASK);
+    bitmasks[index << INDEX_TO_BITMASK_SHIFT] |= mask_with_index_set;
+}
+
+__instrinsic void
+zero_index_in_bitmasks(unsigned int index) 
+{
+    uint32_t mask_with_index_zero = ~(1u >> (index && INDEX_IN_BITMASK_MASK));
+    bitmasks[index << INDEX_TO_BITMASK_SHIFT] &= mask_with_index_set;
+}
+
 
 /* -------------------- k_pace: Debug ------------------------------------------- */
 __export __emem uint32_t wire_debug[1024*1024];
