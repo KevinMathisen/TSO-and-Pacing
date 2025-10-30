@@ -264,20 +264,79 @@ __xread unsigned int notify_reset_state_xfer = 0;
 __shared __gpr unsigned int notify_reset_state_gpr = 0;
 
 /* ========================================================================================*/
-/* -------- k_pace: constants/shared variables -------- */
+/* ------------ k_pace: constants, shared variables, and pacing functions ---------------- */
 /* ========================================================================================*/
 
-#define PACING_QUEUE_SIZE 224
+/* ========================= Pacing Queue and its variables ===============================
+ * (1 tick = 20ns)
+ *
+ *    0                          PQ_SIZE - 1 (223)
+ *    |                                |
+ *  +---+---+-----+------------+-----+---+
+ *  | 0 | 1 | ... |     n      | ... | m |    - 224*16B = 3 584 B
+ *  +---+---+-----+------------+-----+---+
+ * 
+ *                |____________|
+ *                      |
+ *            PQ_SLOT_TICKS (256 ticks = 5.12 us)
+ *  |____________________________________|
+ *                     |
+ *          PQ_HORIZON_TICKS (57 344 ticks = 1.147 ms)    This represents how long in the future we can set packet departures         
+ * 
+ * 
+ * ===================== Calculating Slot/index to insert packet into based on departure time ==================
+ * 
+ * Departure_time:    0000 0000 0001 1110 0010 0000 0011 1110   1101 0110 1001 1111 0100 1101 1010 1011     (8 479 703 562 143 147)
+ *   64 bit
+ *                                                              _____________OFFSET_MASK_______________     ( 0x0000FFFF )
+ * 
+ * Offset:            ---- ---- ---- ---- ---- ---- ---- ----   ---- ---- ---- ---- 0100 1101 1010 1011     ( 17 835, which is within 57 344 ticks)
+ *  32 bit                                                                              |
+ *                                                                                      +-shift->-+         ( 8 )
+ *                                                                                                |
+ * Slot:              ---- ---- ---- ---- ---- ---- ---- ----   ---- ---- ---- ---- ---- ---- 0100 1101     ( 77 is the slot we want to place in )
+ *  32 bit
+ * 
+ * 
+ * ============================== Bitmask =========================================
+ *  need 1 bit for each slot -> 224 slots -> 7 x 32 bit
+ * 
+ *  +------------+------+------------+
+ *  | bit_mask_0 |  ... | bit_mask_n |   - 7*4B = 28 B
+ *  +------------+------+------------+
+ *                            |
+ *   bitmask:    0000 0000 0000 0000 1000 0000
+ *                                   |
+ *                                There is a packet at index "7 + bitmask_num * 32"
+*/ 
 
-/* k_pace: declare packet size as shared gpr */
-/* __shared __gpr unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc); */
+/* -------- Constants/shared variables (PACING_QUEUE -> PQ) -------- */
+
+#define PQ_SIZE 224
+#define PQ_SLOT_TICKS 256
+#define PQ_HORIZON_TICKS 256*224
+
+#define PQ_OFFSET_MASK 0x0000FFFF   /* Mask to apply to departure time to get offset within horizon */
+#define PQ_SLOT_SHIFT 8             /* How many bits to shift offset to get slot in queue */
+
+#define BITMASK_SIZE 7
 
 /* k_pace: Pacing queue */
-__shared __lmem struct nfd_in_pkt_desc pacing_queue[PACING_QUEUE_SIZE];
+__shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_SIZE];
 __shared __gpr unsigned int head_queue = 0;
 __shared __gpr unsigned int tail_queue = 0;
 __shared __gpr unsigned int len_queue = 0;
 
+/* k_pace: Bitmask */
+__shared __lmem uint32_t bitmask[BITMASK_SIZE];
+
+/* k_pace: FlowID mapping and time */
+__shared __gpr uint64_t flows_prev_dep_time[8];
+
+__shared __gpr uint32_t cur_time_tics_high;
+__shared __gpr uint32_t cur_time_tics_low;
+
+/* ---------------------------- k_pace: Dequeue functions ------------------------------ */
 #define _DEQUEUE_PROC(_pkt)                                             \
 do {                                                                    \
     /* Wait for batch_out._pkt to be available */                       \
@@ -300,7 +359,7 @@ do {                                                                    \
     batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
                                                                         \
     head_queue++;                                                       \
-    if (head_queue >= PACING_QUEUE_SIZE) head_queue = 0;                \
+    if (head_queue >= PQ_SIZE) head_queue = 0;                \
                                                                         \
     _SET_DST_Q(_pkt);                                                   \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
@@ -360,6 +419,7 @@ dequeue_pacing_queue() {
     }
 }
 
+/* --------------------- k_pace utilies ---------------------------------------- */
 __intrinsic void
 raise_signal(SIGNAL *sig)
 {
@@ -369,6 +429,51 @@ raise_signal(SIGNAL *sig)
             NFP_MECSR_SAME_ME_SIGNAL_CTX(ctx);
     local_csr_write(local_csr_same_me_signal, val);
     __implicit_write(sig);
+}
+
+__instrinsic uint64_t
+get_current_time()
+{
+    __asm {
+        local_csr_rd[TIMESTAMP_LOW]
+        immed[cur_time_tics_low]
+
+        local_csr_rd[TIMESTAMP_HIGH]
+        immed[cur_time_tics_high, 0]
+    }
+
+    return (uint64_t)(((uint64_t)cur_time_tics_high>>32) || cur_time_tics_low);
+}
+
+/**
+ * @brief Return departure time for next packet in given flow.
+ * 
+ * @param flow_id 
+ * @param inter_packet_gap_ticks - Convert 500ns to 20ns -> 500ns = 25 x 20ns 
+ * @return uint64_t - Departure time in ticks
+ */
+__instrinsic uint64_t
+get_departure_time(unsigned int flow_id, unsigned int gap_in_ticks)
+{
+    uint64_t next_dep_time = flows_prev_dep_time[flow_id] + gap_in_ticks;
+    uint64_t curtime = get_current_time();
+
+    if ( next_dep_time <= curtime)
+        return curtime;
+
+    return next_dep_time;    
+}
+
+__instrinsic uint64_t
+update_departure_time(unsigned int flow_id, uint64_t lastest_dep_time)
+{
+    flows_prev_dep_time[flow_id] = lastest_dep_time;
+}
+
+__instrinsic uint32_t
+get_index_from_departure_time(uint64_t departure_time_in_ticks)
+{
+    
 }
 
 /* -------------------- k_pace: Debug ------------------------------------------- */
@@ -605,7 +710,7 @@ do {                                                                         \
         /* ======= Write to local memory ============================== */   \
                                                                              \
         /* Stall if queue full */                                            \
-        if (len_queue >= PACING_QUEUE_SIZE-1) {                              \
+        if (len_queue >= PQ_SIZE-1) {                              \
             while(1) { DEBUG(0xAAAA); }                                      \
         }                                                                    \
                                                                              \
@@ -620,7 +725,7 @@ do {                                                                         \
         len_queue++;                                                         \
                                                                              \
         tail_queue++;                                                        \
-        if (tail_queue >= PACING_QUEUE_SIZE) tail_queue = 0;                 \
+        if (tail_queue >= PQ_SIZE) tail_queue = 0;                 \
                                                                              \
     } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
         /* else LSO packets */                                               \
@@ -705,7 +810,7 @@ do {                                                                         \
                 /* ======= Write to local memory ====================== */   \
                                                                              \
                 /* Stall if queue full */                                    \
-                if (len_queue >= PACING_QUEUE_SIZE-1) {                      \
+                if (len_queue >= PQ_SIZE-1) {                      \
                     while(1) { DEBUG(0xAAAA); }                              \
                 }                                                            \
                                                                              \
@@ -719,7 +824,7 @@ do {                                                                         \
                                                     0xFFFF0000;              \
                                                                              \
                 tail_queue++;                                                \
-                if (tail_queue >= PACING_QUEUE_SIZE) tail_queue = 0;         \
+                if (tail_queue >= PQ_SIZE) tail_queue = 0;         \
                 len_queue++;                                                 \
                                                                              \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
@@ -864,7 +969,7 @@ _notify(__shared __gpr unsigned int *complete,
 
         do {
             dequeue_pacing_queue();
-        } while (len_queue > PACING_QUEUE_SIZE-64);
+        } while (len_queue > PQ_SIZE-64);
 
     } else if (num_avail > 0) {
         /* There is a partial batch - process messages one at a time. */
@@ -961,7 +1066,7 @@ _notify(__shared __gpr unsigned int *complete,
 
         do {
             dequeue_pacing_queue();
-        } while (len_queue > PACING_QUEUE_SIZE-64);
+        } while (len_queue > PQ_SIZE-64);
 
     } else {
         /* Participate in ctm_ring_get ordering */
