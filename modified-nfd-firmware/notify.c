@@ -359,7 +359,7 @@ __shared __gpr unsigned int len_queue = 0;
 __shared __lmem uint32_t bitmasks[BITMASK_SIZE];
 
 /* k_pace: FlowID mapping and time */
-__shared __gpr uint64_t flows_prev_dep_time[8];
+__shared __lmem uint64_t flows_prev_dep_time[8];
 
 __shared __gpr uint32_t cur_time_tics_high;
 __shared __gpr uint32_t cur_time_tics_low;
@@ -464,7 +464,7 @@ get_current_time()
 {
     __asm {
         local_csr_rd[TIMESTAMP_LOW]
-        immed[cur_time_tics_low]
+        immed[cur_time_tics_low, 0]
 
         local_csr_rd[TIMESTAMP_HIGH]
         immed[cur_time_tics_high, 0]
