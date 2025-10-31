@@ -756,9 +756,9 @@ do {                                                                         \
         /* --------------k_pace --------------------------*/                 \
         /* Read pacing rate + flow id from vlan field */                     \
         vlan_field = batch_in.pkt##_pkt##.vlan;                              \
-        pacing_rate = vlan_field & 0x0FFF;                                   \
+        ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */      \
         flow_id = (vlan_field >> 12) & 0x000F;                               \
-        dep_time = get_departure_time(flow_id, pacing_rate);                 \
+        dep_time = get_departure_time(flow_id, ipg_ticks);                   \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_NON_LSO_PKT_DESC);     \
@@ -767,25 +767,23 @@ do {                                                                         \
         pkt_desc_tmp.is_nfd = batch_in.pkt##_pkt##.eop;                      \
         pkt_desc_tmp.offset = batch_in.pkt##_pkt##.offset;                   \
                                                                              \
-        /* ======= Write to local memory ============================== */   \
+        /* ======= Enqueue packet ===================================== */   \
                                                                              \
-        /* Stall if queue full */                                            \
-        if (len_queue >= PQ_SIZE-1) {                              \
-            while(1) { DEBUG(0xAAAA); }                                      \
-        }                                                                    \
+        pq_index = get_index_from_departure_time(dep_time);                  \
+        pq_index = get_next_available_index(pq_index);                       \
                                                                              \
         /* Place packet in next available slot in pacing queue */            \
-        pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];           \
-        pacing_queue[tail_queue].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] | \
+        pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];             \
+        pacing_queue[pq_index].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |   \
                                             notify_reset_state_gpr);         \
-        pacing_queue[tail_queue].__raw[2] = batch_in.pkt##_pkt##.__raw[2];   \
+        pacing_queue[pq_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
         /* k_pace: Zero vlan / l3_offset */                                  \
-        pacing_queue[tail_queue].__raw[3] = batch_in.pkt##_pkt##.__raw[3] &  \
+        pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3] &    \
                                             0xFFFF0000;                      \
-        len_queue++;                                                         \
                                                                              \
-        tail_queue++;                                                        \
-        if (tail_queue >= PQ_SIZE) tail_queue = 0;                 \
+        add_index_to_bitmasks(pq_index);                                     \
+        update_departure_time(flow_id, dep_time);                            \
+        /* TODO: adjust departure time to reflect which index we actually got */ \
                                                                              \
     } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
         /* else LSO packets */                                               \
@@ -798,9 +796,9 @@ do {                                                                         \
         /* --------------k_pace --------------------------*/                 \
         /* Read pacing rate from Issued Desc. vlan field */                  \
         vlan_field = batch_in.pkt##_pkt##.vlan;                              \
-        pacing_rate = vlan_field & 0x0FFF;                                   \
+        ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */      \
         flow_id = (vlan_field >> 12) & 0x000F;                               \
-        dep_time = get_departure_time(flow_id, pacing_rate);                 \
+        dep_time = get_departure_time(flow_id, ipg_ticks);                   \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
@@ -868,25 +866,24 @@ do {                                                                         \
                 pkt_desc_tmp.is_nfd = lso_pkt.desc.eop;                      \
                 pkt_desc_tmp.offset = lso_pkt.desc.offset;                   \
                                                                              \
-                /* ======= Write to local memory ====================== */   \
+                /* ======= Enqueue packet ============================= */   \
                                                                              \
-                /* Stall if queue full */                                    \
-                if (len_queue >= PQ_SIZE-1) {                      \
-                    while(1) { DEBUG(0xAAAA); }                              \
-                }                                                            \
+                pq_index = get_index_from_departure_time(dep_time);          \
+                pq_index = get_next_available_index(pq_index);               \
                                                                              \
                 /* Place packet in next available slot in pacing queue */    \
-                pacing_queue[tail_queue].__raw[0] = pkt_desc_tmp.__raw[0];   \
-                pacing_queue[tail_queue].__raw[1] = (lso_pkt.desc.__raw[1] | \
+                pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];     \
+                pacing_queue[pq_index].__raw[1] = (lso_pkt.desc.__raw[1] |   \
                                                     notify_reset_state_gpr); \
-                pacing_queue[tail_queue].__raw[2] = lso_pkt.desc.__raw[2];   \
+                pacing_queue[pq_index].__raw[2] = lso_pkt.desc.__raw[2];     \
                 /* k_pace: Zero vlan / l3_offset */                          \
-                pacing_queue[tail_queue].__raw[3] = lso_pkt.desc.__raw[3] &  \
+                pacing_queue[pq_index].__raw[3] = lso_pkt.desc.__raw[3] &    \
                                                     0xFFFF0000;              \
                                                                              \
-                tail_queue++;                                                \
-                if (tail_queue >= PQ_SIZE) tail_queue = 0;         \
-                len_queue++;                                                 \
+                add_index_to_bitmasks(pq_index);                             \
+                                                                             \
+                /* update departure time of next packet in tso chunk */      \
+                dep_time += ipg_ticks;                                       \
                                                                              \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_ALL_LSO_PKTS_TO_ME_WQ);     \
@@ -914,6 +911,9 @@ do {                                                                         \
                 /* XXX this may be a msg rather than a pkt, if cont */       \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_LAST_PKT_FM_LSO_RING);      \
+                                                                             \
+                /* k_pace: update last departure time (substract last add) */ \
+                update_departure_time(flow_id, dep_time-ipg_ticks);          \
                                                                              \
                 /* Break out of loop processing LSO ring */                  \
                 /* TODO how can we catch obvious MU ring corruption? */      \
@@ -953,7 +953,7 @@ _notify(__shared __gpr unsigned int *complete,
     __gpr uint32_t raw0_buff;
 
     /* K_pace: variables we use to enqueue */
-    uint16_t vlan_field, pacing_rate, flow_id;
+    uint16_t vlan_field, ipg_ticks, flow_id;
     uint32_t pq_index;
     uint64_t dep_time;
 
