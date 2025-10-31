@@ -343,11 +343,11 @@ __shared __gpr uint32_t debug_calls = 0;
 #define PQ_HORIZON_TICKS 256*224
 
 #define PQ_OFFSET_MASK 0x00000000FFFFFFFF   /* Mask to apply to departure time to get offset within horizon */
-#define PQ_SLOT_SHIFT 8                     /* How many bits to shift offset to get slot in queue */
+#define PQ_SLOT_SHIFT 8u                     /* How many bits to shift offset to get slot in queue */
 
 #define BITMASK_SIZE 7
-#define INDEX_TO_BITMASK_SHIFT 5            /* each bitmask 32 bits, so need to remove 5 first bits to get bitmask index  */
-#define INDEX_IN_BITMASK_MASK 0x0000001F;   /* ... and only keep first 5 to get index inside bitmask */
+#define INDEX_TO_BITMASK_SHIFT 5u           /* each bitmask 32 bits, so need to remove 5 first bits to get bitmask index  */
+#define INDEX_IN_BITMASK_MASK 0x0000001F    /* ... and only keep first 5 to get index inside bitmask */
 
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_SIZE];
