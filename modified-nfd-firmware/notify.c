@@ -755,9 +755,10 @@ do {                                                                         \
                                                                              \
         /* --------------k_pace --------------------------*/                 \
         /* Read pacing rate + flow id from vlan field */                     \
-        uint16_t vlan_field = batch_in.pkt##_pkt##.vlan;                     \
-        uint16_t pacing_rate = vlan_field & 0x0FFF;                          \
-        uint16_t flow_id = (vlan_field >> 12) & 0x000F;                      \
+        vlan_field = batch_in.pkt##_pkt##.vlan;                              \
+        pacing_rate = vlan_field & 0x0FFF;                                   \
+        flow_id = (vlan_field >> 12) & 0x000F;                               \
+        dep_time = get_departure_time(flow_id, pacing_rate);                 \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_NON_LSO_PKT_DESC);     \
@@ -796,9 +797,10 @@ do {                                                                         \
                                                                              \
         /* --------------k_pace --------------------------*/                 \
         /* Read pacing rate from Issued Desc. vlan field */                  \
-        uint16_t vlan_field = batch_in.pkt##_pkt##.vlan;                     \
-        uint16_t pacing_rate = vlan_field & 0x0FFF;                          \
-        uint16_t flow_id = (vlan_field >> 12) & 0x000F;                      \
+        vlan_field = batch_in.pkt##_pkt##.vlan;                              \
+        pacing_rate = vlan_field & 0x0FFF;                                   \
+        flow_id = (vlan_field >> 12) & 0x000F;                               \
+        dep_time = get_departure_time(flow_id, pacing_rate);                 \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
@@ -949,6 +951,11 @@ _notify(__shared __gpr unsigned int *complete,
     struct nfd_in_pkt_desc pkt_desc_tmp;
 
     __gpr uint32_t raw0_buff;
+
+    /* K_pace: variables we use to enqueue */
+    uint16_t vlan_field, pacing_rate, flow_id;
+    uint32_t pq_index;
+    uint64_t dep_time;
 
     /* Reorder before potentially issuing a ring get */
     wait_for_all(&get_order_sig);
