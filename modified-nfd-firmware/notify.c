@@ -267,6 +267,32 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 /* ------------ k_pace: constants, shared variables, and pacing functions ---------------- */
 /* ========================================================================================*/
 
+/* -------------------- k_pace: Debug ------------------------------------------- */
+__export __emem uint32_t wire_debug[1024*1024];
+__export __emem uint32_t wire_debug_idx;
+
+__shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
+__shared __gpr uint32_t debug_calls = 0;
+
+/*
+ * Write a 32-bit words to EMEM for debugging, without swapping contexts.
+ * Its contents can be read using "nfp-rtsym _wire_debug"
+ * (We print 800th to 1000th tso burst)
+*/
+#define DEBUG(_a) do { \
+    if (debug_index < 200) { \
+        if (debug_calls >= 50) { \
+            SIGNAL debug_sig;    \
+            batch_out.pkt7.__raw[3] = _a; \
+            __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
+            while (!signal_test(&debug_sig));  \
+            debug_index += 1; \
+        } \
+        debug_calls += 1; \
+    } \
+ } while(0)
+
+
 /* ========================= Pacing Queue and its variables ===============================
  * (1 tick = 20ns)
  *
@@ -533,32 +559,6 @@ zero_index_in_bitmasks(unsigned int index)
     uint32_t mask_with_index_zero = ~(1u << (index & INDEX_IN_BITMASK_MASK));
     bitmasks[index >> INDEX_TO_BITMASK_SHIFT] &= mask_with_index_zero;
 }
-
-
-/* -------------------- k_pace: Debug ------------------------------------------- */
-__export __emem uint32_t wire_debug[1024*1024];
-__export __emem uint32_t wire_debug_idx;
-
-__shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
-__shared __gpr uint32_t debug_calls = 0;
-
-/*
- * Write a 32-bit words to EMEM for debugging, without swapping contexts.
- * Its contents can be read using "nfp-rtsym _wire_debug"
- * (We print 800th to 1000th tso burst)
-*/
-#define DEBUG(_a) do { \
-    if (debug_index < 200) { \
-        if (debug_calls >= 50) { \
-            SIGNAL debug_sig;    \
-            batch_out.pkt7.__raw[3] = _a; \
-            __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
-            while (!signal_test(&debug_sig));  \
-            debug_index += 1; \
-        } \
-        debug_calls += 1; \
-    } \
- } while(0)
 
 /* --------------------------------------------------- */
 
