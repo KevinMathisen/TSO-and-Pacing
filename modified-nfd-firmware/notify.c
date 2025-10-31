@@ -520,12 +520,16 @@ get_next_available_index(uint32_t pq_index)
     bitmask = bitmasks[bitmask_index];
 
     /* Read through bitmasks until we find an available slot or reach head */
-    while (1) {
+    while (head_queue != PQ_SIZE) { /* (Will always evaluate to true) */
+
         /* Read through all slots in one bitmask */
         while(index_in_bitmask < 32) {
             slot = (bitmask_index << INDEX_TO_BITMASK_SHIFT) + index_in_bitmask;
 
-            if (slot == head_queue) while(1) { DEBUG(0xAAAA); } /* No slot found! */
+            if (slot == head_queue) { /* No slot found! */
+                DEBUG(0xAAAA);
+                halt();
+            }
             
             if ((bitmask & (1u << index_in_bitmask)) == 0)
                 return slot;
@@ -537,6 +541,7 @@ get_next_available_index(uint32_t pq_index)
         if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;
         bitmask = bitmasks[bitmask_index];
     }
+    return PQ_SIZE;
 }
 
 __intrinsic int
