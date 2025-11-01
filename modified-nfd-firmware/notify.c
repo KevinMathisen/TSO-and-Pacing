@@ -1100,14 +1100,14 @@ _notify(__shared __gpr unsigned int *complete,
         pkt_desc_tmp.seq_num = 0;
 #endif
 
-        _NOTIFY_PROC(0);
-        _NOTIFY_PROC(1);
-        _NOTIFY_PROC(2);
-        _NOTIFY_PROC(3);
-        _NOTIFY_PROC(4);
-        _NOTIFY_PROC(5);
-        _NOTIFY_PROC(6);
-        _NOTIFY_PROC(7);
+        _NOTIFY_PROC(0, 0);
+        _NOTIFY_PROC(1, 1);
+        _NOTIFY_PROC(2, 2);
+        _NOTIFY_PROC(3, 3);
+        _NOTIFY_PROC(4, 4);
+        _NOTIFY_PROC(5, 5);
+        _NOTIFY_PROC(6, 6);
+        _NOTIFY_PROC(7, 7);
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
@@ -1156,7 +1156,7 @@ _notify(__shared __gpr unsigned int *complete,
         for (;;) {
             /* Count the message and service it */
             partial_served++;
-            _NOTIFY_PROC(0);
+            _NOTIFY_PROC(0, 8);
 
             /* Wait for new messages in ctm ring.
              * Note: other contexts should not fetch new messages or update
@@ -1203,7 +1203,7 @@ _notify(__shared __gpr unsigned int *complete,
                              &msg_order_sig);
 
         /* Process the final descriptor from the batch */
-        _NOTIFY_PROC(0);
+        _NOTIFY_PROC(0, 9);
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
