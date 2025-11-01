@@ -492,6 +492,17 @@ get_departure_time(unsigned int flow_id, unsigned int gap_in_ticks)
     return next_dep_time;    
 }
 
+__intrinsic uint64_t
+get_time_from_index(unsigned int index)
+{
+    /* Completely replace current times bits 8-15 with index */
+    uint64_t index_time = (get_current_time() & 0xFFFFFFFFFFFF00FF) |
+                          (index << PQ_SLOT_SHIFT);
+    if (index < head_queue)
+        index_time += PQ_HORIZON_TICKS;
+    return index_time;
+}
+
 __intrinsic void
 update_departure_time(unsigned int flow_id, uint64_t lastest_dep_time)
 {
