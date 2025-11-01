@@ -470,7 +470,7 @@ get_current_time()
         immed[cur_time_tics_high, 0]
     }
 
-    return (((uint64_t)cur_time_tics_high)>>32) || (uint64_t)cur_time_tics_low;
+    return (((uint64_t)cur_time_tics_high)>>32) | (uint64_t)cur_time_tics_low;
 }
 
 /**
@@ -521,29 +521,30 @@ get_index_from_departure_time(uint64_t departure_time_in_ticks)
     return dep_time_offset >> PQ_SLOT_SHIFT;
 }
 
+/**
+ * Find the first available slot in the pacing queue by checking the bitmask.
+ * Iterate through one bitmask at a time. 
+ * 
+ * @param pq_index  - initial index we want to place packet in
+ * @return          - index we end up with
+ */
 __intrinsic uint32_t
 get_next_available_index(uint32_t pq_index)
 {
-    unsigned int bitmask_index, index_in_bitmask, bitmask, slot;
+    unsigned int bitmask_index, index_in_bitmask, bitmask, i;
 
     bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;
     index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;
+
     bitmask = bitmasks[bitmask_index];
 
     /* Read through bitmasks until we find an available slot or reach head */
-    while (head_queue != PQ_SIZE) { /* (Will always evaluate to true) */
+    for (i = 0; i < 3; i++) {
 
         /* Read through all slots in one bitmask */
         while(index_in_bitmask < 32) {
-            slot = (bitmask_index << INDEX_TO_BITMASK_SHIFT) + index_in_bitmask;
-
-            if (slot == head_queue) { /* No slot found! */
-                DEBUG(0xAAAA);
-                halt();
-            }
-            
             if ((bitmask & (1u << index_in_bitmask)) == 0)
-                return slot;
+                return (bitmask_index << INDEX_TO_BITMASK_SHIFT) + index_in_bitmask;
             index_in_bitmask++;
         }
         /* New bitmask to check */
@@ -552,14 +553,17 @@ get_next_available_index(uint32_t pq_index)
         if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;
         bitmask = bitmasks[bitmask_index];
     }
+
+    /* No slot found within 64-96 slots of initial */
+    halt();
     return PQ_SIZE;
 }
 
 __intrinsic int
 is_packet_at_index(uint32_t index)
 {
-    return bitmasks[index >> INDEX_TO_BITMASK_SHIFT] &
-            (1u << (index & INDEX_IN_BITMASK_MASK)) != 0;
+    return (bitmasks[index >> INDEX_TO_BITMASK_SHIFT] &
+            (1u << (index & INDEX_IN_BITMASK_MASK))) != 0;
 }
 
 __intrinsic void
@@ -971,7 +975,7 @@ _notify(__shared __gpr unsigned int *complete,
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field, ipg_ticks, flow_id;
     uint32_t pq_index;
-    uint64_t dep_time;
+    uint64_t dep_time, curtime;
 
     /* Reorder before potentially issuing a ring get */
     wait_for_all(&get_order_sig);
