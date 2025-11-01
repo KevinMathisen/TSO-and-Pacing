@@ -313,13 +313,13 @@ __shared __gpr uint32_t debug_calls = 0;
  * ===================== Calculating Slot/index to insert packet into based on departure time ==================
  * 
  * Departure_time:    0000 0000 0001 1110 0010 0000 0011 1110   1101 0110 1001 1111 0100 1101 1010 1011     (8 479 703 562 143 147)
- *   64 bit
- *                    __________________________________OFFSET_MASK____________________________________     ( 0x00000000FFFFFFFF )
- * 
- * Offset:            ---- ---- ---- ---- ---- ---- ---- ----   ---- ---- ---- ---- 0100 1101 1010 1011     ( 17 835, which is within 57 344 ticks)
- *  32 bit                                                                              |
- *                                                                                      +-shift->-+         ( 8 )
+ *  64 bit                                                                              |
+ *                                                                                      +-shift->-+         ( PQ_SLOT_SHIFT = 8 )
  *                                                                                                |
+ * Offset:            ---- ---- 0000 0000 0001 1110 0010 0000   0011 1110 1101 0110 1001 1111 0100 1101
+ *  64 bit
+ *                    ________________________________PQ_OFFSET_MASK___________________________________     ( 0xFF )
+ * 
  * Slot:              ---- ---- ---- ---- ---- ---- ---- ----   ---- ---- ---- ---- ---- ---- 0100 1101     ( 77 is the slot we want to place in )
  *  32 bit
  * 
@@ -342,7 +342,7 @@ __shared __gpr uint32_t debug_calls = 0;
 #define PQ_SLOT_TICKS 256
 #define PQ_HORIZON_TICKS 256*224
 
-#define PQ_OFFSET_MASK 0x00000000FFFFFFFF   /* Mask to apply to departure time to get offset within horizon */
+#define PQ_OFFSET_MASK 0xFF                  /* Mask to apply to departure time to get offset within horizon */
 #define PQ_SLOT_SHIFT 8u                     /* How many bits to shift offset to get slot in queue */
 
 #define BITMASK_SIZE 7
@@ -766,7 +766,7 @@ do {} while (0)
 #endif
 
 
-#define _NOTIFY_PROC(_pkt)                                                   \
+#define _NOTIFY_PROC(_pkt, _n)                                               \
 do {                                                                         \
     /* --------------k_pace -------------------------- */                    \
     /* Read pacing rate + flow id from vlan field */                         \
@@ -795,10 +795,8 @@ do {                                                                         \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
         /* -------------- Get index ------------- */                         \
-        pq_index = (uint32_t)(dep_time & PQ_OFFSET_MASK);                    \
-        if (pq_index >= PQ_HORIZON_TICKS)                                    \
-            pq_index = pq_index - PQ_HORIZON_TICKS;                          \
-        pq_index = pq_index >> PQ_SLOT_SHIFT;                                \
+        pq_index = (uint32_t)(dep_time >> PQ_SLOT_SHIFT) & PQ_OFFSET_MASK;   \
+        if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                        \
                                                                              \
         /* -------------- Find next available index ------------------ */    \
         bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;                  \
@@ -813,7 +811,7 @@ do {                                                                         \
                 if ((bitmask & (1u << index_in_bitmask)) == 0) {             \
                     pq_index = (bitmask_index << INDEX_TO_BITMASK_SHIFT)     \
                                                         + index_in_bitmask;  \
-                    i = 4; break;                                            \
+                    goto found_slot##_n;                                     \
                 }                                                            \
                 index_in_bitmask++;                                          \
             }                                                                \
@@ -824,7 +822,9 @@ do {                                                                         \
             bitmask = bitmasks[bitmask_index];                               \
         }                                                                    \
         /* No slot found within 64-96 slots of initial */                    \
-        if (pq_index == PQ_SIZE) halt();                                     \
+        halt();                                                              \
+                                                                             \
+        found_slot##_n:;                                                     \
                                                                              \
         /* --------- Place packet in queue -------------- */                 \
                                                                              \
@@ -921,10 +921,9 @@ do {                                                                         \
                 /* ======= Enqueue packet ============================= */   \
                                                                              \
                 /* -------------- Get index ------------- */                 \
-                pq_index = (uint32_t)(dep_time & PQ_OFFSET_MASK);            \
-                if (pq_index >= PQ_HORIZON_TICKS)                            \
-                    pq_index = pq_index - PQ_HORIZON_TICKS;                  \
-                pq_index = pq_index >> PQ_SLOT_SHIFT;                        \
+                pq_index = (uint32_t)(dep_time >> PQ_SLOT_SHIFT)             \
+                                                        & PQ_OFFSET_MASK;    \
+                if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                \
                                                                              \
                 /* -------------- Find next available index ------- */       \
                 bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;          \
@@ -940,7 +939,7 @@ do {                                                                         \
                             pq_index =                                       \
                                 (bitmask_index << INDEX_TO_BITMASK_SHIFT)    \
                                                         + index_in_bitmask;  \
-                            i = 4; break;                                    \
+                            goto found_slot_lso##_n;                         \
                         }                                                    \
                         index_in_bitmask++;                                  \
                     }                                                        \
@@ -951,7 +950,9 @@ do {                                                                         \
                     bitmask = bitmasks[bitmask_index];                       \
                 }                                                            \
                 /* No slot found within 64-96 slots of initial */            \
-                if (pq_index == PQ_SIZE) halt();                             \
+                halt();                                                      \
+                                                                             \
+                found_slot_lso##_n:;                                         \
                                                                              \
                 /* --------- Place packet in queue -------------- */         \
                                                                              \
@@ -1039,8 +1040,9 @@ _notify(__shared __gpr unsigned int *complete,
     __gpr uint32_t raw0_buff;
 
     /* K_pace: variables we use to enqueue */
-    uint16_t vlan_field, ipg_ticks, flow_id;
-    uint32_t pq_index, bitmask_index, index_in_bitmask, bitmask, i;
+    uint16_t vlan_field;
+    uint32_t flow_id, ipg_ticks, pq_index;
+    uint32_t bitmask_index, index_in_bitmask, bitmask, i;
     uint64_t dep_time, curtime;
 
     /* Reorder before potentially issuing a ring get */
