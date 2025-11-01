@@ -768,17 +768,22 @@ do {} while (0)
 
 #define _NOTIFY_PROC(_pkt)                                                   \
 do {                                                                         \
+    /* --------------k_pace -------------------------- */                    \
+    /* Read pacing rate + flow id from vlan field */                         \
+    vlan_field = batch_in.pkt##_pkt##.vlan;                                  \
+    ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */          \
+    flow_id = (vlan_field >> 12) & 0x000F;                                   \
+                                                                             \
+    /* Calculate departure time for packet */                                \
+    curtime = get_current_time();                                            \
+    dep_time = flows_prev_dep_time[flow_id] + ipg_ticks;                     \
+    if ( dep_time <= curtime) dep_time = curtime;                            \
+    /* ----------------------------------------------- */                    \
+                                                                             \
     NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                               \
                          NFD_IN_LSO_CNTR_T_NOTIFY_ALL_PKT_DESC);             \
     /* finished packet and no LSO */                                         \
     if (batch_in.pkt##_pkt##.eop) {                                          \
-                                                                             \
-        /* --------------k_pace --------------------------*/                 \
-        /* Read pacing rate + flow id from vlan field */                     \
-        vlan_field = batch_in.pkt##_pkt##.vlan;                              \
-        ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */      \
-        flow_id = (vlan_field >> 12) & 0x000F;                               \
-        dep_time = get_departure_time(flow_id, ipg_ticks);                   \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_NON_LSO_PKT_DESC);     \
@@ -812,13 +817,6 @@ do {                                                                         \
         SIGNAL_MASK lso_wait_msk;                                            \
         __shared __gpr unsigned int jumbo_compl_seq;                         \
         int seqn_chk;                                                        \
-                                                                             \
-        /* --------------k_pace --------------------------*/                 \
-        /* Read pacing rate from Issued Desc. vlan field */                  \
-        vlan_field = batch_in.pkt##_pkt##.vlan;                              \
-        ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */      \
-        flow_id = (vlan_field >> 12) & 0x000F;                               \
-        dep_time = get_departure_time(flow_id, ipg_ticks);                   \
                                                                              \
         NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
                              NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
