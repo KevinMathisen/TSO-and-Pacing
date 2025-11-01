@@ -794,8 +794,39 @@ do {                                                                         \
                                                                              \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
-        pq_index = get_index_from_departure_time(dep_time);                  \
-        pq_index = get_next_available_index(pq_index);                       \
+        /* -------------- Get index ------------- */                         \
+        pq_index = (uint32_t)(dep_time & PQ_OFFSET_MASK);                    \
+        if (pq_index >= PQ_HORIZON_TICKS)                                    \
+            pq_index = pq_index - PQ_HORIZON_TICKS;                          \
+        pq_index = pq_index >> PQ_SLOT_SHIFT;                                \
+                                                                             \
+        /* -------------- Find next available index ------------------ */    \
+        bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;                  \
+        index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;                 \
+        bitmask = bitmasks[bitmask_index];                                   \
+                                                                             \
+        pq_index = PQ_SIZE;                                                  \
+        /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
+        for (i = 0; i < 3; i++) {                                            \
+            /* Read through all slots in one bitmask */                      \
+            while(index_in_bitmask < 32) {                                   \
+                if ((bitmask & (1u << index_in_bitmask)) == 0) {             \
+                    pq_index = (bitmask_index << INDEX_TO_BITMASK_SHIFT)     \
+                                                        + index_in_bitmask;  \
+                    i = 4; break;                                            \
+                }                                                            \
+                index_in_bitmask++;                                          \
+            }                                                                \
+            /* New bitmask to check */                                       \
+            index_in_bitmask = 0;                                            \
+            bitmask_index++;                                                 \
+            if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;            \
+            bitmask = bitmasks[bitmask_index];                               \
+        }                                                                    \
+        /* No slot found within 64-96 slots of initial */                    \
+        if (pq_index == PQ_SIZE) halt();                                     \
+                                                                             \
+        /* --------- Place packet in queue -------------- */                 \
                                                                              \
         /* Place packet in next available slot in pacing queue */            \
         pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];             \
@@ -806,8 +837,11 @@ do {                                                                         \
         pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3] &    \
                                             0xFFFF0000;                      \
                                                                              \
-        add_index_to_bitmasks(pq_index);                                     \
-        update_departure_time(flow_id, dep_time);                            \
+        /* Add index to bitmasks */                                          \
+        bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |= (1u <<               \
+                                        (pq_index & INDEX_IN_BITMASK_MASK)); \
+        /* Update departure time of flow */                                  \
+        flows_prev_dep_time[flow_id] = dep_time;                             \
         /* TODO: adjust departure time to reflect which index we actually got */ \
                                                                              \
     } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
@@ -886,8 +920,40 @@ do {                                                                         \
                                                                              \
                 /* ======= Enqueue packet ============================= */   \
                                                                              \
-                pq_index = get_index_from_departure_time(dep_time);          \
-                pq_index = get_next_available_index(pq_index);               \
+                /* -------------- Get index ------------- */                 \
+                pq_index = (uint32_t)(dep_time & PQ_OFFSET_MASK);            \
+                if (pq_index >= PQ_HORIZON_TICKS)                            \
+                    pq_index = pq_index - PQ_HORIZON_TICKS;                  \
+                pq_index = pq_index >> PQ_SLOT_SHIFT;                        \
+                                                                             \
+                /* -------------- Find next available index ------- */       \
+                bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;          \
+                index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;         \
+                bitmask = bitmasks[bitmask_index];                           \
+                                                                             \
+                pq_index = PQ_SIZE;                                          \
+                /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
+                for (i = 0; i < 3; i++) {                                    \
+                    /* Read through all slots in one bitmask */              \
+                    while(index_in_bitmask < 32) {                           \
+                        if ((bitmask & (1u << index_in_bitmask)) == 0) {     \
+                            pq_index =                                       \
+                                (bitmask_index << INDEX_TO_BITMASK_SHIFT)    \
+                                                        + index_in_bitmask;  \
+                            i = 4; break;                                    \
+                        }                                                    \
+                        index_in_bitmask++;                                  \
+                    }                                                        \
+                    /* New bitmask to check */                               \
+                    index_in_bitmask = 0;                                    \
+                    bitmask_index++;                                         \
+                    if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;    \
+                    bitmask = bitmasks[bitmask_index];                       \
+                }                                                            \
+                /* No slot found within 64-96 slots of initial */            \
+                if (pq_index == PQ_SIZE) halt();                             \
+                                                                             \
+                /* --------- Place packet in queue -------------- */         \
                                                                              \
                 /* Place packet in next available slot in pacing queue */    \
                 pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];     \
@@ -898,7 +964,9 @@ do {                                                                         \
                 pacing_queue[pq_index].__raw[3] = lso_pkt.desc.__raw[3] &    \
                                                     0xFFFF0000;              \
                                                                              \
-                add_index_to_bitmasks(pq_index);                             \
+                /* Add index to bitmasks */                                  \
+                bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |= (1u <<       \
+                                        (pq_index & INDEX_IN_BITMASK_MASK)); \
                                                                              \
                 /* update departure time of next packet in tso chunk */      \
                 dep_time += ipg_ticks;                                       \
@@ -930,8 +998,8 @@ do {                                                                         \
                 NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
                         NFD_IN_LSO_CNTR_T_NOTIFY_LAST_PKT_FM_LSO_RING);      \
                                                                              \
-                /* k_pace: update last departure time (substract last add) */ \
-                update_departure_time(flow_id, dep_time-ipg_ticks);          \
+                /* k_pace: update last departure time (substract last add)*/ \
+                flows_prev_dep_time[flow_id] = dep_time-ipg_ticks;           \
                                                                              \
                 /* Break out of loop processing LSO ring */                  \
                 /* TODO how can we catch obvious MU ring corruption? */      \
@@ -972,7 +1040,7 @@ _notify(__shared __gpr unsigned int *complete,
 
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field, ipg_ticks, flow_id;
-    uint32_t pq_index;
+    uint32_t pq_index, bitmask_index, index_in_bitmask, bitmask, i;
     uint64_t dep_time, curtime;
 
     /* Reorder before potentially issuing a ring get */
