@@ -801,25 +801,30 @@ do {                                                                         \
         /* -------------- Find next available index ------------------ */    \
         bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;                  \
         index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;                 \
-        bitmask = bitmasks[bitmask_index];                                   \
                                                                              \
         pq_index = PQ_SIZE;                                                  \
         /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
         for (i = 0; i < 3; i++) {                                            \
-            /* Read through all slots in one bitmask */                      \
-            while(index_in_bitmask < 32) {                                   \
-                if ((bitmask & (1u << index_in_bitmask)) == 0) {             \
-                    pq_index = (bitmask_index << INDEX_TO_BITMASK_SHIFT)     \
-                                                        + index_in_bitmask;  \
-                    goto found_slot##_n;                                     \
+            bitmask = ~bitmasks[bitmask_index];                              \
+                                                                             \
+            /* Ignore bits below start index for first bitmask */            \
+            bitmask &= (~0u << index_in_bitmask);                            \
+                                                                             \
+            /* There is atleast one available slot this bitmask */           \
+            if (bitmask) {                                                   \
+                index_in_bitmask = 0;                                        \
+                while ((bitmask & 1u) == 0) {                                \
+                    bitmask >>= 1;                                           \
+                    index_in_bitmask++;                                      \
                 }                                                            \
-                index_in_bitmask++;                                          \
+                pq_index = (bitmask_index << INDEX_TO_BITMASK_SHIFT)         \
+                                                        + index_in_bitmask;  \
+                goto found_slot##_n;                                         \
             }                                                                \
             /* New bitmask to check */                                       \
             index_in_bitmask = 0;                                            \
             bitmask_index++;                                                 \
             if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;            \
-            bitmask = bitmasks[bitmask_index];                               \
         }                                                                    \
         /* No slot found within 64-96 slots of initial */                    \
         halt();                                                              \
@@ -928,26 +933,30 @@ do {                                                                         \
                 /* -------------- Find next available index ------- */       \
                 bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;          \
                 index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;         \
-                bitmask = bitmasks[bitmask_index];                           \
                                                                              \
                 pq_index = PQ_SIZE;                                          \
                 /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
                 for (i = 0; i < 3; i++) {                                    \
-                    /* Read through all slots in one bitmask */              \
-                    while(index_in_bitmask < 32) {                           \
-                        if ((bitmask & (1u << index_in_bitmask)) == 0) {     \
-                            pq_index =                                       \
-                                (bitmask_index << INDEX_TO_BITMASK_SHIFT)    \
-                                                        + index_in_bitmask;  \
-                            goto found_slot_lso##_n;                         \
+                    bitmask = ~bitmasks[bitmask_index];                      \
+                                                                             \
+                    /* Ignore bits below start index for first bitmask */    \
+                    bitmask &= (~0u << index_in_bitmask);                    \
+                                                                             \
+                    /* There is atleast one available space this bitmask */  \
+                    if (bitmask) {                                           \
+                        index_in_bitmask = 0;                                \
+                        while ((bitmask & 1u) == 0) {                        \
+                            bitmask >>= 1;                                   \
+                            index_in_bitmask++;                              \
                         }                                                    \
-                        index_in_bitmask++;                                  \
+                        pq_index = (bitmask_index << INDEX_TO_BITMASK_SHIFT) \
+                                                        + index_in_bitmask;  \
+                        goto found_slot_lso##_n;                             \
                     }                                                        \
                     /* New bitmask to check */                               \
                     index_in_bitmask = 0;                                    \
                     bitmask_index++;                                         \
                     if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;    \
-                    bitmask = bitmasks[bitmask_index];                       \
                 }                                                            \
                 /* No slot found within 64-96 slots of initial */            \
                 halt();                                                      \
