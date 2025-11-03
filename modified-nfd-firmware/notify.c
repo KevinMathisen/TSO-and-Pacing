@@ -365,13 +365,13 @@ __shared __gpr uint32_t cur_time_tics_high;
 __shared __gpr uint32_t cur_time_tics_low;
 
 /* ---------------------------- k_pace: Dequeue functions ------------------------------ */
-#define _DEQUEUE_PROC(_pkt)                                             \
+#define _DEQUEUE_PROC(_pkt, pq_index)                                   \
 do {                                                                    \
     /* Wait for batch_out._pkt to be available */                       \
     wait_for_all(&wq_sig##_pkt);                                        \
     __implicit_read(&wq_sig##_pkt);                                     \
                                                                         \
-    raw0_buff = pacing_queue[head_queue].__raw[0];                      \
+    raw0_buff = pacing_queue[pq_index].__raw[0];                        \
                                                                         \
     /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
     local_csr_write(local_csr_active_lm_addr_3,                         \
@@ -382,12 +382,9 @@ do {                                                                    \
     __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
                                                                         \
     batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
-    batch_out.pkt##_pkt##.__raw[1] = pacing_queue[head_queue].__raw[1]; \
-    batch_out.pkt##_pkt##.__raw[2] = pacing_queue[head_queue].__raw[2]; \
-    batch_out.pkt##_pkt##.__raw[3] = pacing_queue[head_queue].__raw[3]; \
-                                                                        \
-    head_queue++;                                                       \
-    if (head_queue >= PQ_SIZE) head_queue = 0;                \
+    batch_out.pkt##_pkt##.__raw[1] = pacing_queue[pq_index].__raw[1];   \
+    batch_out.pkt##_pkt##.__raw[2] = pacing_queue[pq_index].__raw[2];   \
+    batch_out.pkt##_pkt##.__raw[3] = pacing_queue[pq_index].__raw[3];   \
                                                                         \
     _SET_DST_Q(_pkt);                                                   \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
