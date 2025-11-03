@@ -404,12 +404,15 @@ dequeue_pacing_queue() {
     __gpr uint32_t raw0_buff;
     uint32_t index_in_bitmask, bitmask_index;
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
+    uint64_t now = get_current_time();
 
-    dequeue_end_index = (uint32_t)((get_current_time() >> PQ_SLOT_SHIFT) 
-                                                    & PQ_SLOT_MASK) + 1;
+    if (now <= pq_head_time) return;
+
+    uint32_t slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
+    if (slots_to_send == 0) return;
+
+    dequeue_end_index = pq_head + slots_to_send;
     if (dequeue_end_index >= PQ_SIZE) dequeue_end_index -= PQ_SIZE;
-
-    if (pq_head >= dequeue_end_index) return;
 
     // We are not done until we reach current time, or have used (all) batch_out
     while (next_batch_out != 8) {
