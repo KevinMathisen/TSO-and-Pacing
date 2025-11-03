@@ -295,9 +295,12 @@ __shared __gpr uint32_t debug_calls = 0;
 
 /* ========================= Pacing Queue and its variables ===============================
  * (1 tick = 20ns)
- *
- *    0                          PQ_SIZE - 1 (223)
- *    |                                |
+ *            pq_head_time (time in ticks)
+ *                      |
+ *                 pq_head (index)
+ *                      | 
+ *    0                 |        PQ_SIZE - 1 (223)
+ *    |                 |              |
  *  +---+---+-----+------------+-----+---+
  *  | 0 | 1 | ... |     n      | ... | m |    - 224*16B = 3 584 B
  *  +---+---+-----+------------+-----+---+
@@ -313,15 +316,17 @@ __shared __gpr uint32_t debug_calls = 0;
  * ===================== Calculating Slot/index to insert packet into based on departure time ==================
  * 
  * Departure_time:    0000 0000 0001 1110 0010 0000 0011 1110   1101 0110 1001 1111 0100 1101 1010 1011     (8 479 703 562 143 147)
- *  64 bit                                                                              |
- *                                                                                      +-shift->-+         ( PQ_SLOT_SHIFT = 8 )
- *                                                                                                |
- * Offset:            ---- ---- 0000 0000 0001 1110 0010 0000   0011 1110 1101 0110 1001 1111 0100 1101
- *  64 bit
- *                    __________________________________PQ_SLOT_MASK___________________________________     ( 0xFF )
- * 
- * Slot:              ---- ---- ---- ---- ---- ---- ---- ----   ---- ---- ---- ---- ---- ---- 0100 1101     ( 77 is the slot we want to place in )
- *  32 bit
+ *  64 bit                                                    |
+ *                                   +--- Subtract by head ---+
+ *                                   v
+ * Delta_time:        0000 0000 0000 0000 0110 1101 1010 1011       ( 28075 ticks, 561 us in the future)
+ *  32 bit                                    |
+ *                                            +-shift->-+           ( PQ_SLOT_SHIFT = 8 )
+ *                                                      |
+ * Delta_slots:       0000 0000 0000 0000 0000 0000 0110 1101       ( 109 )
+ *  32 bit                               |
+ *                        So we can add 109 to pq_head to get
+ *                        where we should place the packet.
  * 
  * 
  * ============================== Bitmask =========================================
@@ -351,7 +356,7 @@ __shared __gpr uint32_t debug_calls = 0;
 
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_SIZE];
-__shared __gpr uint32_t head_queue = 0;
+__shared __gpr uint32_t pq_head = 0;
 __gpr uint32_t next_batch_out = 0;
 __gpr uint32_t dequeue_end_index = 0;
 
@@ -403,7 +408,7 @@ dequeue_pacing_queue() {
                                                     & PQ_SLOT_MASK) + 1;
     if (dequeue_end_index >= PQ_SIZE) dequeue_end_index -= PQ_SIZE;
 
-    if (head_queue >= dequeue_end_index) return;
+    if (pq_head >= dequeue_end_index) return;
 
     // We are not done until we reach current time, or have used (all) batch_out
     while (next_batch_out != 8) {
@@ -422,25 +427,25 @@ dequeue_pacing_queue() {
 
         // Wait is done, so we can dequeue. Need to check if we should still dequeue 
         //  (as head may have been moved while we waited)
-        if (head_queue > dequeue_end_index) break;
+        if (pq_head > dequeue_end_index) break;
 
-        /* --- We are now checking slot head_queue points to */
+        /* --- We are now checking slot pq_head points to */
 
         // Calculate which bitmask to check
-        bitmask_index = head_queue >> INDEX_TO_BITMASK_SHIFT;
-        index_in_bitmask = head_queue & INDEX_IN_BITMASK_MASK;
+        bitmask_index = pq_head >> INDEX_TO_BITMASK_SHIFT;
+        index_in_bitmask = pq_head & INDEX_IN_BITMASK_MASK;
 
         // If slot/head contains packet we dequeue it using LRU batch_out._pkt
         if((bitmasks[bitmask_index] >> index_in_bitmask) & 0x1) {
             switch (next_batch_out) {
-                case 0: _DEQUEUE_PROC(0, head_queue); break;
-                case 1: _DEQUEUE_PROC(1, head_queue); break;
-                case 2: _DEQUEUE_PROC(2, head_queue); break;
-                case 3: _DEQUEUE_PROC(3, head_queue); break;
-                case 4: _DEQUEUE_PROC(4, head_queue); break;
-                case 5: _DEQUEUE_PROC(5, head_queue); break;
-                case 6: _DEQUEUE_PROC(6, head_queue); break;
-                case 7: _DEQUEUE_PROC(7, head_queue); break;
+                case 0: _DEQUEUE_PROC(0, pq_head); break;
+                case 1: _DEQUEUE_PROC(1, pq_head); break;
+                case 2: _DEQUEUE_PROC(2, pq_head); break;
+                case 3: _DEQUEUE_PROC(3, pq_head); break;
+                case 4: _DEQUEUE_PROC(4, pq_head); break;
+                case 5: _DEQUEUE_PROC(5, pq_head); break;
+                case 6: _DEQUEUE_PROC(6, pq_head); break;
+                case 7: _DEQUEUE_PROC(7, pq_head); break;
             }
 
             next_batch_out++;
@@ -450,12 +455,12 @@ dequeue_pacing_queue() {
         }
 
         /* Let other threads know we have checked slot at head, 
-            so we move head_queue one forward */
-        head_queue++;
-        if (head_queue == PQ_SIZE) head_queue = 0;
+            so we move pq_head one forward */
+        pq_head++;
+        if (pq_head == PQ_SIZE) pq_head = 0;
 
         // If we have moved past current, we can skip the wait and just exit
-        if (head_queue > dequeue_end_index) break;
+        if (pq_head > dequeue_end_index) break;
     }
 
     if (next_batch_out == 8) next_batch_out = 0;
@@ -512,7 +517,7 @@ get_time_from_index(unsigned int index)
     /* Completely replace current times bits 8-15 with index */
     uint64_t index_time = (get_current_time() & 0xFFFFFFFFFFFF00FF) |
                           (index << PQ_SLOT_SHIFT);
-    if (index < head_queue)
+    if (index < pq_head)
         index_time += PQ_HORIZON_TICKS;
     return index_time;
 }
