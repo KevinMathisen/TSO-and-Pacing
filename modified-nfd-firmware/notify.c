@@ -780,13 +780,9 @@ do {                                                                         \
     if ( dep_time <= curtime) dep_time = curtime;                            \
     /* ----------------------------------------------- */                    \
                                                                              \
-    NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                               \
-                         NFD_IN_LSO_CNTR_T_NOTIFY_ALL_PKT_DESC);             \
     /* finished packet and no LSO */                                         \
     if (batch_in.pkt##_pkt##.eop) {                                          \
                                                                              \
-        NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
-                             NFD_IN_LSO_CNTR_T_NOTIFY_NON_LSO_PKT_DESC);     \
         __critical_path();                                                   \
         _NOTIFY_MU_CHK(_pkt);                                                \
         pkt_desc_tmp.is_nfd = batch_in.pkt##_pkt##.eop;                      \
@@ -857,8 +853,6 @@ do {                                                                         \
         __shared __gpr unsigned int jumbo_compl_seq;                         \
         int seqn_chk;                                                        \
                                                                              \
-        NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                           \
-                             NFD_IN_LSO_CNTR_T_NOTIFY_LSO_PKT_DESC);         \
         /* XXX __signals(&lso_sig_pair.even) lists both even and odd */      \
         lso_wait_msk = 1 << __signal_number(&lso_sig_pair.even);             \
                                                                              \
@@ -878,8 +872,6 @@ do {                                                                         \
             }                                                                \
             lso_msg_copy(&lso_pkt, lso_xnum);                                \
                                                                              \
-            NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                       \
-                    NFD_IN_LSO_CNTR_T_NOTIFY_ALL_PKT_FM_LSO_RING);           \
                                                                              \
             /* Wait for the jumbo compl seq to catch up to the encoded seq */ \
             copy_absolute_xfer(&jumbo_compl_seq, jumbo_compl_xnum);          \
@@ -981,15 +973,7 @@ do {                                                                         \
                 /* update departure time of next packet in tso chunk */      \
                 dep_time += ipg_ticks;                                       \
                                                                              \
-                NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
-                        NFD_IN_LSO_CNTR_T_NOTIFY_ALL_LSO_PKTS_TO_ME_WQ);     \
-                if (lso_pkt.desc.lso_end) {                                  \
-                    NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,               \
-                            NFD_IN_LSO_CNTR_T_NOTIFY_LSO_END_PKTS_TO_ME_WQ); \
-                }                                                            \
             } else {                                                         \
-                NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
-                        NFD_IN_LSO_CNTR_T_NOTIFY_LSO_CONT_SKIP_ME_WQ);       \
                                                                              \
                 /* XXX lso_pkt.desc.lso must be NFD_IN_ISSUED_DESC_LSO_RET */ \
                 /* else we have a logic bug or ring corruption */            \
@@ -1004,15 +988,11 @@ do {                                                                         \
                                                                              \
             /* if it is last LSO being read from ring */                     \
             if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) {            \
-                /* XXX this may be a msg rather than a pkt, if cont */       \
-                NFD_IN_LSO_CNTR_INCR(nfd_in_lso_cntr_addr,                   \
-                        NFD_IN_LSO_CNTR_T_NOTIFY_LAST_PKT_FM_LSO_RING);      \
                                                                              \
                 /* k_pace: update last departure time (substract last add)*/ \
                 flows_prev_dep_time[flow_id] = dep_time-ipg_ticks;           \
                                                                              \
                 /* Break out of loop processing LSO ring */                  \
-                /* TODO how can we catch obvious MU ring corruption? */      \
                 break;                                                       \
             }                                                                \
         }                                                                    \
