@@ -318,7 +318,7 @@ __shared __gpr uint32_t debug_calls = 0;
  *                                                                                                |
  * Offset:            ---- ---- 0000 0000 0001 1110 0010 0000   0011 1110 1101 0110 1001 1111 0100 1101
  *  64 bit
- *                    ________________________________PQ_OFFSET_MASK___________________________________     ( 0xFF )
+ *                    __________________________________PQ_SLOT_MASK___________________________________     ( 0xFF )
  * 
  * Slot:              ---- ---- ---- ---- ---- ---- ---- ----   ---- ---- ---- ---- ---- ---- 0100 1101     ( 77 is the slot we want to place in )
  *  32 bit
@@ -342,7 +342,7 @@ __shared __gpr uint32_t debug_calls = 0;
 #define PQ_SLOT_TICKS 256
 #define PQ_HORIZON_TICKS 256*224
 
-#define PQ_OFFSET_MASK 0xFF                  /* Mask to apply to departure time to get offset within horizon */
+#define PQ_SLOT_MASK 0xFF                  /* Mask to apply to departure time to get offset within horizon */
 #define PQ_SLOT_SHIFT 8u                     /* How many bits to shift offset to get slot in queue */
 
 #define BITMASK_SIZE 7
@@ -351,9 +351,9 @@ __shared __gpr uint32_t debug_calls = 0;
 
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_SIZE];
-__shared __gpr unsigned int head_queue = 0;
-__shared __gpr unsigned int tail_queue = 0;
-__shared __gpr unsigned int len_queue = 0;
+__shared __gpr uint32_t head_queue = 0;
+__gpr uint32_t next_batch_out = 0;
+__gpr uint32_t dequeue_end_index = 0;
 
 /* k_pace: Bitmask */
 __shared __lmem uint32_t bitmasks[BITMASK_SIZE];
@@ -367,10 +367,6 @@ __shared __gpr uint32_t cur_time_tics_low;
 /* ---------------------------- k_pace: Dequeue functions ------------------------------ */
 #define _DEQUEUE_PROC(_pkt, pq_index)                                   \
 do {                                                                    \
-    /* Wait for batch_out._pkt to be available */                       \
-    wait_for_all(&wq_sig##_pkt);                                        \
-    __implicit_read(&wq_sig##_pkt);                                     \
-                                                                        \
     raw0_buff = pacing_queue[pq_index].__raw[0];                        \
                                                                         \
     /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
@@ -399,49 +395,70 @@ do {                                                                    \
  */
 __intrinsic void
 dequeue_pacing_queue() {
-    unsigned int dequeue_batch_size;
     __gpr uint32_t raw0_buff;
-    unsigned int out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
+    uint32_t index_in_bitmask, bitmask_index;
+    uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
 
-    if (len_queue) {
-        /* Update queue size so no other workers will steal our work */
-        dequeue_batch_size = (len_queue < 8) ? len_queue : 8;
-        len_queue -= dequeue_batch_size;
+    dequeue_end_index = (uint32_t)((get_current_time() >> PQ_SLOT_SHIFT) 
+                                                    & PQ_SLOT_MASK) + 1;
+    if (dequeue_end_index >= PQ_SIZE) dequeue_end_index -= PQ_SIZE;
 
-        /* Place packets in xfer out, add to work queue */
-        /* Add packets we process to wait mask, and use this signal */
-        if (dequeue_batch_size >= 1)
-            _DEQUEUE_PROC(0);
+    if (head_queue >= dequeue_end_index) return;
 
-        if (dequeue_batch_size >= 2) {
-            _DEQUEUE_PROC(1);
+    // We are not done until we reach current time, or have used (all) batch_out
+    while (next_batch_out != 8) {
+        
+        // Wait until the least recently used batch_out._pkt is available to write
+        switch (next_batch_out) {
+            case 0: wait_for_all(&wq_sig0); break;
+            case 1: wait_for_all(&wq_sig1); break;
+            case 2: wait_for_all(&wq_sig2); break;
+            case 3: wait_for_all(&wq_sig3); break;
+            case 4: wait_for_all(&wq_sig4); break;
+            case 5: wait_for_all(&wq_sig5); break;
+            case 6: wait_for_all(&wq_sig6); break;
+            case 7: wait_for_all(&wq_sig7); break;
         }
 
-        if (dequeue_batch_size >= 3) {
-            _DEQUEUE_PROC(2);
+        // Wait is done, so we can dequeue. Need to check if we should still dequeue 
+        //  (as head may have been moved while we waited)
+        if (head_queue > dequeue_end_index) break;
+
+        /* --- We are now checking slot head_queue points to */
+
+        // Calculate which bitmask to check
+        bitmask_index = head_queue >> INDEX_TO_BITMASK_SHIFT;
+        index_in_bitmask = head_queue & INDEX_IN_BITMASK_MASK;
+
+        // If slot/head contains packet we dequeue it using LRU batch_out._pkt
+        if((bitmasks[bitmask_index] >> index_in_bitmask) & 0x1) {
+            switch (next_batch_out) {
+                case 0: _DEQUEUE_PROC(0, head_queue); break;
+                case 1: _DEQUEUE_PROC(1, head_queue); break;
+                case 2: _DEQUEUE_PROC(2, head_queue); break;
+                case 3: _DEQUEUE_PROC(3, head_queue); break;
+                case 4: _DEQUEUE_PROC(4, head_queue); break;
+                case 5: _DEQUEUE_PROC(5, head_queue); break;
+                case 6: _DEQUEUE_PROC(6, head_queue); break;
+                case 7: _DEQUEUE_PROC(7, head_queue); break;
+            }
+
+            next_batch_out++;
+
+            // Zero bitmask for this slot
+            bitmasks[bitmask_index] &= ~(1u << index_in_bitmask);
         }
 
-        if (dequeue_batch_size >= 4) {
-            _DEQUEUE_PROC(3);
-        }
+        /* Let other threads know we have checked slot at head, 
+            so we move head_queue one forward */
+        head_queue++;
+        if (head_queue == PQ_SIZE) head_queue = 0;
 
-        if (dequeue_batch_size >= 5) {
-            _DEQUEUE_PROC(4);
-        }
-
-        if (dequeue_batch_size >= 6) {
-            _DEQUEUE_PROC(5);
-        }
-
-        if (dequeue_batch_size >= 7) {
-            _DEQUEUE_PROC(6);
-        }
-
-        if (dequeue_batch_size >= 8) {
-            _DEQUEUE_PROC(7);
-        }
-
+        // If we have moved past current, we can skip the wait and just exit
+        if (head_queue > dequeue_end_index) break;
     }
+
+    if (next_batch_out == 8) next_batch_out = 0;
 }
 
 /* --------------------- k_pace utilies ---------------------------------------- */
@@ -467,7 +484,7 @@ get_current_time()
         immed[cur_time_tics_high, 0]
     }
 
-    return (((uint64_t)cur_time_tics_high)>>32) | (uint64_t)cur_time_tics_low;
+    return (((uint64_t)cur_time_tics_high)<<32) | (uint64_t)cur_time_tics_low;
 }
 
 /**
@@ -510,7 +527,7 @@ __intrinsic uint32_t
 get_index_from_departure_time(uint64_t departure_time_in_ticks)
 {
     /* 1. Get offset */
-    uint32_t dep_time_offset = (uint32_t)(departure_time_in_ticks & PQ_OFFSET_MASK);
+    uint32_t dep_time_offset = (uint32_t)(departure_time_in_ticks & PQ_SLOT_MASK);
     if (dep_time_offset >= PQ_HORIZON_TICKS) 
         dep_time_offset = dep_time_offset - PQ_HORIZON_TICKS;
 
@@ -788,7 +805,7 @@ do {                                                                         \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
         /* -------------- Get index ------------- */                         \
-        pq_index = (uint32_t)(dep_time >> PQ_SLOT_SHIFT) & PQ_OFFSET_MASK;   \
+        pq_index = (uint32_t)(dep_time >> PQ_SLOT_SHIFT) & PQ_SLOT_MASK;     \
         if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                        \
                                                                              \
         /* -------------- Find next available index ------------------ */    \
@@ -916,7 +933,7 @@ do {                                                                         \
                                                                              \
                 /* -------------- Get index ------------- */                 \
                 pq_index = (uint32_t)(dep_time >> PQ_SLOT_SHIFT)             \
-                                                        & PQ_OFFSET_MASK;    \
+                                                        & PQ_SLOT_MASK;      \
                 if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                \
                                                                              \
                 /* -------------- Find next available index ------- */       \
@@ -1211,9 +1228,8 @@ _notify(__shared __gpr unsigned int *complete,
         reorder_done_opt(&next_ctx, &msg_order_sig);
     }
 
-    do {
-        dequeue_pacing_queue();
-    } while (len_queue > PQ_SIZE-64);
+    /* Dequeue all packets which should be sent */
+    dequeue_pacing_queue();
 }
 
 
