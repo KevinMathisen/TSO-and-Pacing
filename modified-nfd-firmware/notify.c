@@ -357,6 +357,7 @@ __shared __gpr uint32_t debug_calls = 0;
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_SIZE];
 __shared __gpr uint32_t pq_head = 0;
+__shared __gpr uint32_t pq_head_time = 0;
 __gpr uint32_t next_batch_out = 0;
 __gpr uint32_t dequeue_end_index = 0;
 
@@ -810,7 +811,17 @@ do {                                                                         \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
         /* -------------- Get index ------------- */                         \
-        pq_index = (uint32_t)(dep_time >> PQ_SLOT_SHIFT) & PQ_SLOT_MASK;     \
+        delta_slots = 0                                                      \
+                                                                             \
+        /* Calculate packet slot based on how long in future from head */    \
+        if (dep_time > pq_head_time)                                         \
+            delta_slots = (uint32_t)((dep_time - pq_head_time) >> PQ_SLOT_SHIFT); \
+                                                                             \
+        /* Ensure packet is not enqueued to far in future */                 \
+        if (delta_slots >= 192) detla_slots = 192;                           \
+                                                                             \
+        /* Find actual slot to enqueue in relation to head */                \
+        pq_index = pq_head + delta_slots;                                    \
         if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                        \
                                                                              \
         /* -------------- Find next available index ------------------ */    \
@@ -826,6 +837,7 @@ do {                                                                         \
             bitmask &= (~0u << index_in_bitmask);                            \
                                                                              \
             /* There is atleast one available slot this bitmask */           \
+            /* Go through bitmask until we find the slot, then use this. */  \
             if (bitmask) {                                                   \
                 index_in_bitmask = 0;                                        \
                 while ((bitmask & 1u) == 0) {                                \
@@ -937,8 +949,17 @@ do {                                                                         \
                 /* ======= Enqueue packet ============================= */   \
                                                                              \
                 /* -------------- Get index ------------- */                 \
-                pq_index = (uint32_t)(dep_time >> PQ_SLOT_SHIFT)             \
-                                                        & PQ_SLOT_MASK;      \
+                delta_slots = 0                                              \
+                                                                             \
+                /* Calculate packet slot based on how long in future from head */ \
+                if (dep_time > pq_head_time)                                 \
+                    delta_slots = (uint32_t)((dep_time - pq_head_time) >> PQ_SLOT_SHIFT); \
+                                                                             \
+                /* Ensure packet is not enqueued to far in future */         \
+                if (delta_slots >= 192) detla_slots = 192;                   \
+                                                                             \
+                /* Find actual slot to enqueue in relation to head */        \
+                pq_index = pq_head + delta_slots;                            \
                 if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                \
                                                                              \
                 /* -------------- Find next available index ------- */       \
@@ -1049,7 +1070,7 @@ _notify(__shared __gpr unsigned int *complete,
 
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
-    uint32_t flow_id, ipg_ticks, pq_index;
+    uint32_t flow_id, ipg_ticks, pq_index, delta_slots;
     uint32_t bitmask_index, index_in_bitmask, bitmask, i;
     uint64_t dep_time, curtime;
 
