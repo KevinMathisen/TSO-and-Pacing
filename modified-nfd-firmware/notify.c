@@ -753,6 +753,9 @@ notify_setup(int side)
                            NFD_EMEM_LINK(PCIE_ISL)) >> 32) << 24);
     }
 
+    /* ------ k_pace: init & setup ------- */
+
+    /* Raised wq signals to signal that batch_out is available */
     raise_signal(&wq_sig0);
     raise_signal(&wq_sig1);
     raise_signal(&wq_sig2);
@@ -761,6 +764,9 @@ notify_setup(int side)
     raise_signal(&wq_sig5);
     raise_signal(&wq_sig6);
     raise_signal(&wq_sig7);
+
+    /* Initialize head timer, and align it to slots */
+    pq_head_time = get_current_time() & ~((uint64_t)PQ_SLOT_TICKS - 1ull);
 }
 
 #ifndef NFD_MU_PTR_DBG_MSK
