@@ -370,6 +370,23 @@ __shared __lmem uint64_t flows_prev_dep_time[8];
 __shared __gpr uint32_t cur_time_tics_high;
 __shared __gpr uint32_t cur_time_tics_low;
 
+
+/* --------------------- k_pace utilies ---------------------------------------- */
+
+__intrinsic uint64_t
+get_current_time()
+{
+    __asm {
+        local_csr_rd[TIMESTAMP_LOW]
+        immed[cur_time_tics_low, 0]
+
+        local_csr_rd[TIMESTAMP_HIGH]
+        immed[cur_time_tics_high, 0]
+    }
+
+    return (((uint64_t)cur_time_tics_high)<<32) | (uint64_t)cur_time_tics_low;
+}
+
 /* ---------------------------- k_pace: Dequeue functions ------------------------------ */
 #define _DEQUEUE_PROC(_pkt, pq_index)                                   \
 do {                                                                    \
@@ -402,13 +419,13 @@ do {                                                                    \
 __intrinsic void
 dequeue_pacing_queue() {
     __gpr uint32_t raw0_buff;
-    uint32_t index_in_bitmask, bitmask_index;
+    uint32_t index_in_bitmask, bitmask_index, slots_to_send;
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
     uint64_t now = get_current_time();
 
     if (now <= pq_head_time) return;
 
-    uint32_t slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
+    slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
     if (slots_to_send == 0) return;
 
     dequeue_end_index = pq_head + slots_to_send;
@@ -820,14 +837,14 @@ do {                                                                         \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
         /* -------------- Get index ------------- */                         \
-        delta_slots = 0                                                      \
+        delta_slots = 0;                                                     \
                                                                              \
         /* Calculate packet slot based on how long in future from head */    \
         if (dep_time > pq_head_time)                                         \
             delta_slots = (uint32_t)((dep_time - pq_head_time) >> PQ_SLOT_SHIFT); \
                                                                              \
         /* Ensure packet is not enqueued to far in future */                 \
-        if (delta_slots >= 192) detla_slots = 192;                           \
+        if (delta_slots >= 192) delta_slots = 192;                           \
                                                                              \
         /* Find actual slot to enqueue in relation to head */                \
         pq_index = pq_head + delta_slots;                                    \
@@ -958,14 +975,14 @@ do {                                                                         \
                 /* ======= Enqueue packet ============================= */   \
                                                                              \
                 /* -------------- Get index ------------- */                 \
-                delta_slots = 0                                              \
+                delta_slots = 0;                                             \
                                                                              \
                 /* Calculate packet slot based on how long in future from head */ \
                 if (dep_time > pq_head_time)                                 \
                     delta_slots = (uint32_t)((dep_time - pq_head_time) >> PQ_SLOT_SHIFT); \
                                                                              \
                 /* Ensure packet is not enqueued to far in future */         \
-                if (delta_slots >= 192) detla_slots = 192;                   \
+                if (delta_slots >= 192) delta_slots = 192;                   \
                                                                              \
                 /* Find actual slot to enqueue in relation to head */        \
                 pq_index = pq_head + delta_slots;                            \
