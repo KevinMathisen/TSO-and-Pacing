@@ -499,20 +499,6 @@ raise_signal(SIGNAL *sig)
     __implicit_write(sig);
 }
 
-__intrinsic uint64_t
-get_current_time()
-{
-    __asm {
-        local_csr_rd[TIMESTAMP_LOW]
-        immed[cur_time_tics_low, 0]
-
-        local_csr_rd[TIMESTAMP_HIGH]
-        immed[cur_time_tics_high, 0]
-    }
-
-    return (((uint64_t)cur_time_tics_high)<<32) | (uint64_t)cur_time_tics_low;
-}
-
 /**
  * @brief Return departure time for next packet in given flow.
  * 
