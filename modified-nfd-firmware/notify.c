@@ -390,6 +390,9 @@ get_current_time()
 /* ---------------------------- k_pace: Dequeue functions ------------------------------ */
 #define _DEQUEUE_PROC(_pkt, pq_index)                                   \
 do {                                                                    \
+    /* Clear signal (it is implied raised if this macro is called )*/   \
+    wait_for_all(&wq_sig##_pkt);                                        \
+                                                                        \
     raw0_buff = pacing_queue[pq_index].__raw[0];                        \
                                                                         \
     /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
@@ -436,14 +439,14 @@ dequeue_pacing_queue() {
         
         // Wait until the least recently used batch_out._pkt is available to write
         switch (next_batch_out) {
-            case 0: wait_for_all(&wq_sig0); break;
-            case 1: wait_for_all(&wq_sig1); break;
-            case 2: wait_for_all(&wq_sig2); break;
-            case 3: wait_for_all(&wq_sig3); break;
-            case 4: wait_for_all(&wq_sig4); break;
-            case 5: wait_for_all(&wq_sig5); break;
-            case 6: wait_for_all(&wq_sig6); break;
-            case 7: wait_for_all(&wq_sig7); break;
+            case 0: wait_for_any(&wq_sig0); break;
+            case 1: wait_for_any(&wq_sig1); break;
+            case 2: wait_for_any(&wq_sig2); break;
+            case 3: wait_for_any(&wq_sig3); break;
+            case 4: wait_for_any(&wq_sig4); break;
+            case 5: wait_for_any(&wq_sig5); break;
+            case 6: wait_for_any(&wq_sig6); break;
+            case 7: wait_for_any(&wq_sig7); break;
         }
 
         // Wait is done, so we can dequeue. Need to check if we should still dequeue 
