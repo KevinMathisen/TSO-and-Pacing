@@ -400,12 +400,13 @@ raise_signal(SIGNAL *sig)
 }
 
 /* ---------------------------- k_pace: Dequeue functions ------------------------------ */
-#define _DEQUEUE_PROC(_pkt, pq_index)                                   \
+#define _DEQUEUE_PROC(_pkt)                                             \
 do {                                                                    \
     /* Clear signal (it is implied raised if this macro is called )*/   \
-    wait_for_all(&wq_sig##_pkt);                                        \
+    /* (halt if not raised, as this indicates come corruption) */       \
+    if (!signal_test(&wq_sig##_pkt)) halt();                            \
                                                                         \
-    raw0_buff = pacing_queue[pq_index].__raw[0];                        \
+    raw0_buff = pacing_queue[pq_head].__raw[0];                         \
                                                                         \
     /* Point csr addr 3 (seqn_ptr) to correct queue */                  \
     local_csr_write(local_csr_active_lm_addr_3,                         \
@@ -416,9 +417,9 @@ do {                                                                    \
     __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }               \
                                                                         \
     batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                         \
-    batch_out.pkt##_pkt##.__raw[1] = pacing_queue[pq_index].__raw[1];   \
-    batch_out.pkt##_pkt##.__raw[2] = pacing_queue[pq_index].__raw[2];   \
-    batch_out.pkt##_pkt##.__raw[3] = pacing_queue[pq_index].__raw[3];   \
+    batch_out.pkt##_pkt##.__raw[1] = pacing_queue[pq_head].__raw[1];    \
+    batch_out.pkt##_pkt##.__raw[2] = pacing_queue[pq_head].__raw[2];    \
+    batch_out.pkt##_pkt##.__raw[3] = pacing_queue[pq_head].__raw[3];    \
                                                                         \
     _SET_DST_Q(_pkt);                                                   \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
@@ -434,23 +435,22 @@ do {                                                                    \
 __intrinsic void
 dequeue_pacing_queue() {
     __gpr uint32_t raw0_buff;
+    uint64_t now;
     uint32_t index_in_bitmask, bitmask_index, slots_to_send;
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
-    uint64_t now = get_current_time();
 
-    if (now <= pq_head_time) return;
-
-    slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
-    if (slots_to_send == 0) return;
-
-    dequeue_end_index = pq_head + slots_to_send;
-    if (dequeue_end_index >= PQ_SIZE) dequeue_end_index -= PQ_SIZE;
-
-    // We are not done until we reach current time, or have used (all) batch_out
+    /* We are not done until we reach current time (slots_to_send == 0), 
+       or have used (all) batch_out */
     while (next_batch_out != 8) {
         
-        // Wait until the least recently used batch_out._pkt is available to write
-        // (this will check if signal raised, but not clear it)
+        /* Check if any slots are due for departure */
+        now = get_current_time();
+        if (now <= pq_head_time) return;
+        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
+        if (slots_to_send == 0) return;
+
+        /* Wait until the least recently used batch_out._pkt is available to write
+           (this will check if signal raised, but not clear it) */
         switch (next_batch_out) {
             case 0: wait_for_any(&wq_sig0); break;
             case 1: wait_for_any(&wq_sig1); break;
@@ -462,32 +462,35 @@ dequeue_pacing_queue() {
             case 7: wait_for_any(&wq_sig7); break;
         }
 
-        // Wait is done, so we can dequeue. Need to check if we should still dequeue 
-        //  (as head may have been moved while we waited)
-        if (pq_head > dequeue_end_index) break;
+        /* Wait is done, so we can dequeue. Need to check if we should still dequeue 
+           (as head and "now" may have been moved while we waited) */
+        now = get_current_time();
+        if (now <= pq_head_time) return;
+        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
+        if (slots_to_send == 0) return;
 
         /* --- We are now checking slot pq_head points to */
 
-        // Calculate which bitmask to check
+        /* Calculate which bitmask to check */
         bitmask_index = pq_head >> INDEX_TO_BITMASK_SHIFT;
         index_in_bitmask = pq_head & INDEX_IN_BITMASK_MASK;
 
-        // If slot/head contains packet we dequeue it using LRU batch_out._pkt
+        /* If slot/head contains packet we dequeue it using LRU batch_out._pkt */
         if((bitmasks[bitmask_index] >> index_in_bitmask) & 0x1) {
             switch (next_batch_out) {
-                case 0: _DEQUEUE_PROC(0, pq_head); break;
-                case 1: _DEQUEUE_PROC(1, pq_head); break;
-                case 2: _DEQUEUE_PROC(2, pq_head); break;
-                case 3: _DEQUEUE_PROC(3, pq_head); break;
-                case 4: _DEQUEUE_PROC(4, pq_head); break;
-                case 5: _DEQUEUE_PROC(5, pq_head); break;
-                case 6: _DEQUEUE_PROC(6, pq_head); break;
-                case 7: _DEQUEUE_PROC(7, pq_head); break;
+                case 0: _DEQUEUE_PROC(0); break;
+                case 1: _DEQUEUE_PROC(1); break;
+                case 2: _DEQUEUE_PROC(2); break;
+                case 3: _DEQUEUE_PROC(3); break;
+                case 4: _DEQUEUE_PROC(4); break;
+                case 5: _DEQUEUE_PROC(5); break;
+                case 6: _DEQUEUE_PROC(6); break;
+                case 7: _DEQUEUE_PROC(7); break;
             }
 
             next_batch_out++;
 
-            // Zero bitmask for this slot
+            /* Zero bitmask for this slot */
             bitmasks[bitmask_index] &= ~(1u << index_in_bitmask);
         }
 
@@ -496,9 +499,6 @@ dequeue_pacing_queue() {
         pq_head++;
         if (pq_head == PQ_SIZE) pq_head = 0;
         pq_head_time += PQ_SLOT_TICKS; 
-
-        // If we have moved past current, we can skip the wait and just exit
-        if (pq_head > dequeue_end_index) break;
     }
 
     if (next_batch_out == 8) next_batch_out = 0;
