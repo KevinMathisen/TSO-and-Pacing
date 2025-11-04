@@ -1120,8 +1120,6 @@ _notify(__shared __gpr unsigned int *complete,
         ctm_ring_get(NOTIFY_RING_ISL, input_ring, &batch_in.pkt4,
                      (sizeof(struct nfd_in_issued_desc) * 4), &msg_sig1);
 
-        dequeue_pacing_queue();
-
         __asm {
             ctx_arb[--], defer[2];
             local_csr_wr[local_csr_active_ctx_wakeup_events, wait_msk];
@@ -1245,8 +1243,6 @@ _notify(__shared __gpr unsigned int *complete,
         *served += NFD_IN_MAX_BATCH_SZ;
         reorder_done_opt(&next_ctx, &get_order_sig);
 
-        dequeue_pacing_queue();
-
         /* Wait for the last get to complete */
         wait_sig_mask(wait_msk);
         __implicit_read(&msg_sig0);
@@ -1272,8 +1268,6 @@ _notify(__shared __gpr unsigned int *complete,
     } else {
         /* Participate in ctm_ring_get ordering */
         reorder_done_opt(&next_ctx, &get_order_sig);
-
-        dequeue_pacing_queue();
 
         /* Participate in msg ordering */
         wait_for_all(&msg_order_sig);
