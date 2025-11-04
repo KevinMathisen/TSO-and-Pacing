@@ -296,12 +296,13 @@ __shared __gpr uint32_t debug_calls = 0;
 
 /* ========================= Pacing Queue and its variables ===============================
  * (1 tick = 20ns)
+ *
  *            pq_head_time (time in ticks)
- *                      |
- *                 pq_head (index)
- *                      | 
- *    0                 |        PQ_SIZE - 1 (223)
- *    |                 |              |
+ *                |
+ *                |  pq_head (index)
+ *                |       | 
+ *    0           |       |      PQ_LENGTH - 1 (223)
+ *    |           |       |            |
  *  +---+---+-----+------------+-----+---+
  *  | 0 | 1 | ... |     n      | ... | m |    - 224*16B = 3 584 B
  *  +---+---+-----+------------+-----+---+
@@ -322,7 +323,7 @@ __shared __gpr uint32_t debug_calls = 0;
  *                                   v
  * Delta_time:        0000 0000 0000 0000 0110 1101 1010 1011       ( 28075 ticks, 561 us in the future)
  *  32 bit                                    |
- *                                            +-shift->-+           ( PQ_SLOT_SHIFT = 8 )
+ *                                            +-shift->-+           ( PQ_TICKS_TO_SLOT_SHIFT = 8 )
  *                                                      |
  * Delta_slots:       0000 0000 0000 0000 0000 0000 0110 1101       ( 109 )
  *  32 bit                               |
@@ -342,28 +343,26 @@ __shared __gpr uint32_t debug_calls = 0;
  *                                There is a packet at index "7 + bitmask_num * 32"
 */ 
 
-/* -------- Constants/shared variables (PACING_QUEUE -> PQ) -------- */
+/* -------- Constants/shared variables (PACING_QUEUE == PQ) -------- */
 
-#define PQ_SIZE 224
+#define PQ_LENGTH 224
 #define PQ_SLOT_TICKS 256
 #define PQ_HORIZON_TICKS 256*224
 
-#define PQ_SLOT_MASK 0xFF                  /* Mask to apply to departure time to get offset within horizon */
-#define PQ_SLOT_SHIFT 8u                     /* How many bits to shift offset to get slot in queue */
+#define PQ_TICKS_TO_SLOT_SHIFT 8u                    /* How many bits to shift offset to get slot in queue */
 
-#define BITMASK_SIZE 7
+#define BITMASKS_LENGTH 7
 #define INDEX_TO_BITMASK_SHIFT 5u           /* each bitmask 32 bits, so need to remove 5 first bits to get bitmask index  */
 #define INDEX_IN_BITMASK_MASK 0x0000001F    /* ... and only keep first 5 to get index inside bitmask */
 
 /* k_pace: Pacing queue */
-__shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_SIZE];
+__shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_LENGTH];
 __shared __gpr uint32_t pq_head = 0;
 __shared __gpr uint32_t pq_head_time = 0;
 __gpr uint32_t next_batch_out = 0;
-__gpr uint32_t dequeue_end_index = 0;
 
 /* k_pace: Bitmask */
-__shared __lmem uint32_t bitmasks[BITMASK_SIZE];
+__shared __lmem uint32_t bitmasks[BITMASKS_LENGTH];
 
 /* k_pace: FlowID mapping and time */
 __shared __lmem uint64_t flows_prev_dep_time[8];
@@ -446,7 +445,7 @@ dequeue_pacing_queue() {
         /* Check if any slots are due for departure */
         now = get_current_time();
         if (now <= pq_head_time) return;
-        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
+        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_TICKS_TO_SLOT_SHIFT);
         if (slots_to_send == 0) return;
 
         /* Wait until the least recently used batch_out._pkt is available to write
@@ -466,7 +465,7 @@ dequeue_pacing_queue() {
            (as head and "now" may have been moved while we waited) */
         now = get_current_time();
         if (now <= pq_head_time) return;
-        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_SLOT_SHIFT);
+        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_TICKS_TO_SLOT_SHIFT);
         if (slots_to_send == 0) return;
 
         /* --- We are now checking slot pq_head points to */
@@ -497,7 +496,7 @@ dequeue_pacing_queue() {
         /* Let other threads know we have checked slot at head, 
             so we move pq_head one forward */
         pq_head++;
-        if (pq_head == PQ_SIZE) pq_head = 0;
+        if (pq_head == PQ_LENGTH) pq_head = 0;
         pq_head_time += PQ_SLOT_TICKS; 
     }
 
@@ -725,20 +724,21 @@ do {                                                                         \
                                                                              \
         /* Calculate packet slot based on how long in future from head */    \
         if (dep_time > pq_head_time)                                         \
-            delta_slots = (uint32_t)((dep_time - pq_head_time) >> PQ_SLOT_SHIFT); \
+            delta_slots = (uint32_t)((dep_time - pq_head_time) >>            \
+                                                    PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
         /* Ensure packet is not enqueued to far in future */                 \
         if (delta_slots >= 192) delta_slots = 192;                           \
                                                                              \
         /* Find actual slot to enqueue in relation to head */                \
         pq_index = pq_head + delta_slots;                                    \
-        if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                        \
+        if (pq_index >= PQ_LENGTH) pq_index -= PQ_LENGTH;                    \
                                                                              \
         /* -------------- Find next available index ------------------ */    \
         bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;                  \
         index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;                 \
                                                                              \
-        pq_index = PQ_SIZE;                                                  \
+        pq_index = PQ_LENGTH;                                                \
         /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
         for (i = 0; i < 3; i++) {                                            \
             bitmask = ~bitmasks[bitmask_index];                              \
@@ -761,7 +761,7 @@ do {                                                                         \
             /* New bitmask to check */                                       \
             index_in_bitmask = 0;                                            \
             bitmask_index++;                                                 \
-            if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;            \
+            if (bitmask_index >= BITMASKS_LENGTH) bitmask_index = 0;         \
         }                                                                    \
         /* No slot found within 64-96 slots of initial */                    \
         halt();                                                              \
@@ -863,20 +863,21 @@ do {                                                                         \
                                                                              \
                 /* Calculate packet slot based on how long in future from head */ \
                 if (dep_time > pq_head_time)                                 \
-                    delta_slots = (uint32_t)((dep_time - pq_head_time) >> PQ_SLOT_SHIFT); \
+                    delta_slots = (uint32_t)((dep_time - pq_head_time) >>    \
+                                                    PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
                 /* Ensure packet is not enqueued to far in future */         \
                 if (delta_slots >= 192) delta_slots = 192;                   \
                                                                              \
                 /* Find actual slot to enqueue in relation to head */        \
                 pq_index = pq_head + delta_slots;                            \
-                if (pq_index >= PQ_SIZE) pq_index -= PQ_SIZE;                \
+                if (pq_index >= PQ_LENGTH) pq_index -= PQ_LENGTH;            \
                                                                              \
                 /* -------------- Find next available index ------- */       \
                 bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;          \
                 index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;         \
                                                                              \
-                pq_index = PQ_SIZE;                                          \
+                pq_index = PQ_LENGTH;                                        \
                 /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
                 for (i = 0; i < 3; i++) {                                    \
                     bitmask = ~bitmasks[bitmask_index];                      \
@@ -898,7 +899,7 @@ do {                                                                         \
                     /* New bitmask to check */                               \
                     index_in_bitmask = 0;                                    \
                     bitmask_index++;                                         \
-                    if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;    \
+                    if (bitmask_index >= BITMASKS_LENGTH) bitmask_index = 0; \
                 }                                                            \
                 /* No slot found within 64-96 slots of initial */            \
                 halt();                                                      \
