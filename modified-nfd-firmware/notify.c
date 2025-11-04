@@ -448,6 +448,10 @@ dequeue_pacing_queue() {
         slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_TICKS_TO_SLOT_SHIFT);
         if (slots_to_send == 0) return;
 
+        /* TODO: we could check if there even is anything at head to send. if not, we can skip wait and move to next head 
+                 However this only improved speed at medium to low load, and would negatively affect high loads, aka where we
+                 need performance the most. (as at high loads check would always return true) */
+
         /* Wait until the least recently used batch_out._pkt is available to write
            (this will check if signal raised, but not clear it) */
         switch (next_batch_out) {
@@ -475,7 +479,7 @@ dequeue_pacing_queue() {
         index_in_bitmask = pq_head & INDEX_IN_BITMASK_MASK;
 
         /* If slot/head contains packet we dequeue it using LRU batch_out._pkt */
-        if((bitmasks[bitmask_index] >> index_in_bitmask) & 0x1) {
+        if((bitmasks[bitmask_index] >> index_in_bitmask) & 1u) {
             switch (next_batch_out) {
                 case 0: _DEQUEUE_PROC(0); break;
                 case 1: _DEQUEUE_PROC(1); break;
@@ -738,10 +742,9 @@ do {                                                                         \
         bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;                  \
         index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;                 \
                                                                              \
-        pq_index = PQ_LENGTH;                                                \
         /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
         for (i = 0; i < 3; i++) {                                            \
-            bitmask = ~bitmasks[bitmask_index];                              \
+            bitmask = ~bitmasks[bitmask_index]; /* 1 = available */          \
                                                                              \
             /* Ignore bits below start index for first bitmask */            \
             bitmask &= (~0u << index_in_bitmask);                            \
@@ -877,15 +880,15 @@ do {                                                                         \
                 bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;          \
                 index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;         \
                                                                              \
-                pq_index = PQ_LENGTH;                                        \
                 /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
                 for (i = 0; i < 3; i++) {                                    \
-                    bitmask = ~bitmasks[bitmask_index];                      \
+                    bitmask = ~bitmasks[bitmask_index]; /* 1 = available */  \
                                                                              \
                     /* Ignore bits below start index for first bitmask */    \
                     bitmask &= (~0u << index_in_bitmask);                    \
                                                                              \
                     /* There is atleast one available space this bitmask */  \
+                    /* Go through bitmask until we find the slot */          \
                     if (bitmask) {                                           \
                         index_in_bitmask = 0;                                \
                         while ((bitmask & 1u) == 0) {                        \
@@ -974,10 +977,7 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int num_avail;
 
     __xread struct _issued_pkt_batch batch_in;
-    struct _pkt_desc_batch batch_tmp;
     struct nfd_in_pkt_desc pkt_desc_tmp;
-
-    __gpr uint32_t raw0_buff;
 
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
