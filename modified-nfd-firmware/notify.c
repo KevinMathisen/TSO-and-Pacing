@@ -388,6 +388,17 @@ get_current_time()
     return (((uint64_t)cur_time_tics_high)<<32) | (uint64_t)cur_time_tics_low;
 }
 
+__intrinsic void
+raise_signal(SIGNAL *sig)
+{
+    unsigned int val, ctx;
+    ctx = ctx();
+    val = NFP_MECSR_SAME_ME_SIGNAL_SIG_NO(__signal_number(sig)) |
+            NFP_MECSR_SAME_ME_SIGNAL_CTX(ctx);
+    local_csr_write(local_csr_same_me_signal, val);
+    __implicit_write(sig);
+}
+
 /* ---------------------------- k_pace: Dequeue functions ------------------------------ */
 #define _DEQUEUE_PROC(_pkt, pq_index)                                   \
 do {                                                                    \
@@ -491,125 +502,6 @@ dequeue_pacing_queue() {
     }
 
     if (next_batch_out == 8) next_batch_out = 0;
-}
-
-/* --------------------- k_pace utilies ---------------------------------------- */
-__intrinsic void
-raise_signal(SIGNAL *sig)
-{
-    unsigned int val, ctx;
-    ctx = ctx();
-    val = NFP_MECSR_SAME_ME_SIGNAL_SIG_NO(__signal_number(sig)) |
-            NFP_MECSR_SAME_ME_SIGNAL_CTX(ctx);
-    local_csr_write(local_csr_same_me_signal, val);
-    __implicit_write(sig);
-}
-
-/**
- * @brief Return departure time for next packet in given flow.
- * 
- * @param flow_id 
- * @param inter_packet_gap_ticks - Convert 500ns to 20ns -> 500ns = 25 x 20ns 
- * @return uint64_t - Departure time in ticks
- */
-__intrinsic uint64_t
-get_departure_time(unsigned int flow_id, unsigned int gap_in_ticks)
-{
-    uint64_t next_dep_time = flows_prev_dep_time[flow_id] + gap_in_ticks;
-    uint64_t curtime = get_current_time();
-
-    if ( next_dep_time <= curtime)
-        return curtime;
-
-    return next_dep_time;    
-}
-
-__intrinsic uint64_t
-get_time_from_index(unsigned int index)
-{
-    /* Completely replace current times bits 8-15 with index */
-    uint64_t index_time = (get_current_time() & 0xFFFFFFFFFFFF00FF) |
-                          (index << PQ_SLOT_SHIFT);
-    if (index < pq_head)
-        index_time += PQ_HORIZON_TICKS;
-    return index_time;
-}
-
-__intrinsic void
-update_departure_time(unsigned int flow_id, uint64_t lastest_dep_time)
-{
-    flows_prev_dep_time[flow_id] = lastest_dep_time;
-}
-
-__intrinsic uint32_t
-get_index_from_departure_time(uint64_t departure_time_in_ticks)
-{
-    /* 1. Get offset */
-    uint32_t dep_time_offset = (uint32_t)(departure_time_in_ticks & PQ_SLOT_MASK);
-    if (dep_time_offset >= PQ_HORIZON_TICKS) 
-        dep_time_offset = dep_time_offset - PQ_HORIZON_TICKS;
-
-    /* 2. Get slot */
-    return dep_time_offset >> PQ_SLOT_SHIFT;
-}
-
-/**
- * Find the first available slot in the pacing queue by checking the bitmask.
- * Iterate through one bitmask at a time. 
- * 
- * @param pq_index  - initial index we want to place packet in
- * @return          - index we end up with
- */
-__intrinsic uint32_t
-get_next_available_index(uint32_t pq_index)
-{
-    unsigned int bitmask_index, index_in_bitmask, bitmask, i;
-
-    bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;
-    index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;
-
-    bitmask = bitmasks[bitmask_index];
-
-    /* Read through bitmasks until we find an available slot or reach head */
-    for (i = 0; i < 3; i++) {
-
-        /* Read through all slots in one bitmask */
-        while(index_in_bitmask < 32) {
-            if ((bitmask & (1u << index_in_bitmask)) == 0)
-                return (bitmask_index << INDEX_TO_BITMASK_SHIFT) + index_in_bitmask;
-            index_in_bitmask++;
-        }
-        /* New bitmask to check */
-        index_in_bitmask = 0;
-        bitmask_index++;
-        if (bitmask_index >= BITMASK_SIZE) bitmask_index = 0;
-        bitmask = bitmasks[bitmask_index];
-    }
-
-    /* No slot found within 64-96 slots of initial */
-    halt();
-    return PQ_SIZE;
-}
-
-__intrinsic int
-is_packet_at_index(uint32_t index)
-{
-    return (bitmasks[index >> INDEX_TO_BITMASK_SHIFT] &
-            (1u << (index & INDEX_IN_BITMASK_MASK))) != 0;
-}
-
-__intrinsic void
-add_index_to_bitmasks(unsigned int index)
-{
-    uint32_t mask_with_index_set = 1u << (index & INDEX_IN_BITMASK_MASK);
-    bitmasks[index >> INDEX_TO_BITMASK_SHIFT] |= mask_with_index_set;
-}
-
-__intrinsic void
-zero_index_in_bitmasks(unsigned int index) 
-{
-    uint32_t mask_with_index_zero = ~(1u << (index & INDEX_IN_BITMASK_MASK));
-    bitmasks[index >> INDEX_TO_BITMASK_SHIFT] &= mask_with_index_zero;
 }
 
 /* --------------------------------------------------- */
