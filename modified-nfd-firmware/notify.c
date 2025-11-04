@@ -280,8 +280,9 @@ __shared __gpr uint32_t debug_calls = 0;
  * (We print 800th to 1000th tso burst)
 */
 #define DEBUG(_a) do { \
-    if (debug_index < 400) { \
-        if (debug_calls < 500) { \
+    if (debug_index < 200) { \
+        if (debug_calls < 400) { \
+            wait_for_any(&wq_sig7);
             SIGNAL debug_sig;    \
             batch_out.pkt7.__raw[3] = _a; \
             __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
@@ -438,6 +439,7 @@ dequeue_pacing_queue() {
     while (next_batch_out != 8) {
         
         // Wait until the least recently used batch_out._pkt is available to write
+        // (this will check if signal raised, but not clear it)
         switch (next_batch_out) {
             case 0: wait_for_any(&wq_sig0); break;
             case 1: wait_for_any(&wq_sig1); break;
@@ -482,6 +484,7 @@ dequeue_pacing_queue() {
             so we move pq_head one forward */
         pq_head++;
         if (pq_head == PQ_SIZE) pq_head = 0;
+        pq_head_time += PQ_SLOT_TICKS; 
 
         // If we have moved past current, we can skip the wait and just exit
         if (pq_head > dequeue_end_index) break;
