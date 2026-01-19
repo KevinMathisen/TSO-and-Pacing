@@ -358,7 +358,7 @@ __shared __gpr uint32_t debug_calls = 0;
 /* k_pace: Pacing queue */
 __shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_LENGTH];
 __shared __gpr uint32_t pq_head = 0;
-__shared __gpr uint32_t pq_head_time = 0;
+__shared __gpr uint64_t pq_head_time = 0;
 __gpr uint32_t next_batch_out = 0;
 
 /* k_pace: Bitmask */
@@ -376,15 +376,7 @@ __shared __gpr uint32_t cur_time_tics_low;
 __intrinsic uint64_t
 get_current_time()
 {
-    __asm {
-        local_csr_rd[TIMESTAMP_LOW]
-        immed[cur_time_tics_low, 0]
-
-        local_csr_rd[TIMESTAMP_HIGH]
-        immed[cur_time_tics_high, 0]
-    }
-
-    return (((uint64_t)cur_time_tics_high)<<32) | (uint64_t)cur_time_tics_low;
+	return me_tsc_read();
 }
 
 __intrinsic void
@@ -504,7 +496,7 @@ dequeue_pacing_queue() {
         pq_head_time += PQ_SLOT_TICKS; 
     }
 
-    if (next_batch_out == 8) next_batch_out = 0;
+    next_batch_out = 0;
 }
 
 /* --------------------------------------------------- */
