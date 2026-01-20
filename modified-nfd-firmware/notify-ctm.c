@@ -322,16 +322,16 @@ do {                                                                    \
     if (pq_ctm_head == PQ_CTM_LENGTH) pq_ctm_head = 0;                  \
                                                                         \
     __asm {                                                             \
-        mem[read, batch_in.pkt##_pkt##, addr_hi, <<8, addr_lo,          \
+        mem[read, batch_in->pkt##_pkt##, addr_hi, <<8, addr_lo,          \
                         __ct_const_val(2)], ctx_swap[*wq_sig##_pkt]     \
     }                                                                   \
                                                                         \
     /* Packet retrived, send it to the work queue in EMEM */            \
                                                                         \
-    batch_out.pkt##_pkt##.__raw[0] = batch_in.pkt##_pkt##.__raw[0];     \
-    batch_out.pkt##_pkt##.__raw[1] = batch_in.pkt##_pkt##.__raw[1];     \
-    batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
-    batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];     \
+    batch_out.pkt##_pkt##.__raw[0] = batch_in->pkt##_pkt##.__raw[0];     \
+    batch_out.pkt##_pkt##.__raw[1] = batch_in->pkt##_pkt##.__raw[1];     \
+    batch_out.pkt##_pkt##.__raw[2] = batch_in->pkt##_pkt##.__raw[2];     \
+    batch_out.pkt##_pkt##.__raw[3] = batch_in->pkt##_pkt##.__raw[3];     \
                                                                         \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
                             out_msg_sz_2, out_msg_sz_2, sig_done,       \
@@ -344,7 +344,7 @@ do {                                                                    \
  *
  */
 __intrinsic void
-dequeue_pacing_queue() {
+dequeue_pacing_queue(__xread struct _issue_pkt_batch *batch_in) {
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
     __ctm40 void *ctm_ptr;
     unsigned int addr_hi, addr_lo;
@@ -811,7 +811,7 @@ _notify(__shared __gpr unsigned int *complete,
     if (_ctx == 2 || _ctx == 3 || _ctx == 4 || _ctx == 5) {
         reorder_done_opt(&next_ctx, &get_order_sig);
 
-        dequeue_pacing_queue();
+        dequeue_pacing_queue(&batch_in);
 
         wait_for_all(&msg_order_sig);
         reorder_done_opt(&next_ctx, &msg_order_sig);
