@@ -345,31 +345,45 @@ __shared __gpr uint32_t debug_calls = 0;
 
 /* -------- Constants/shared variables (PACING_QUEUE == PQ) -------- */
 
-#define PQ_LENGTH 224
-#define PQ_SLOT_TICKS 256
-#define PQ_HORIZON_TICKS 256*224
+#define PQ_CTM_LENGTH 4096
+#define PQ_LM_LENGTH 192
+#define PQ_LM_SYNC_LENGTH 128
 
-#define PQ_TICKS_TO_SLOT_SHIFT 8u                    /* How many bits to shift offset to get slot in queue */
+#define PQ_SLOT_TICKS 32
+#define PQ_HORIZON_TICKS 32*4096
 
-#define BITMASKS_LENGTH 7
+#define PQ_TICKS_TO_SLOT_SHIFT 5u           /* How many bits to shift offset to get slot in queue */
+
+#define PQ_BITMASKS_LENGTH 128
+#define LM_BITMASKS_LENGTH 6
+
 #define INDEX_TO_BITMASK_SHIFT 5u           /* each bitmask 32 bits, so need to remove 5 first bits to get bitmask index  */
 #define INDEX_IN_BITMASK_MASK 0x0000001F    /* ... and only keep first 5 to get index inside bitmask */
 
-/* k_pace: Pacing queue */
-__shared __lmem struct nfd_in_pkt_desc pacing_queue[PQ_LENGTH];
-__shared __gpr uint32_t pq_head = 0;
+
+#define PQ_TRESH_FUTURE_SLOTS 3072
+
+/* CTM Pacing Queue */
+__export __ctm40 struct nfd_in_pkt_desc ctm_pacing_queue[PQ_CTM_LENGTH];
+
+__shared __lmem struct nfd_in_pkt_desc lm_pacing_queue[PQ_LM_LENGTH];
+
+__shared __gpr uint32_t pq_ctm_head = 0;
 __shared __gpr uint64_t pq_head_time = 0;
+__shared __gpr uint32_t pq_ctm_sync_end = 0;
+
+__shared __gpr uint32_t pq_lm_head = 0;
+__shared __gpr uint32_t pq_lm_dequeue_cnt = 0;
+__shared __gpr uint32_t pq_lm_sync_end = 0;
+
 __gpr uint32_t next_batch_out = 0;
 
 /* k_pace: Bitmask */
-__shared __lmem uint32_t bitmasks[BITMASKS_LENGTH];
+__shared __lmem uint32_t bitmasks[PQ_BITMASKS_LENGTH];
+__shared __lmem uint32_t lm_bitmasks[LM_BITMASKS_LENGTH];
 
 /* k_pace: FlowID mapping and time */
 __shared __lmem uint64_t flows_prev_dep_time[8];
-
-__shared __gpr uint32_t cur_time_tics_high;
-__shared __gpr uint32_t cur_time_tics_low;
-
 
 /* --------------------- k_pace utilies ---------------------------------------- */
 
@@ -654,15 +668,17 @@ notify_setup(int side)
 
     /* ------ k_pace: init & setup ------- */
 
-    /* Raised wq signals to signal that batch_out is available */
-    raise_signal(&wq_sig0);
-    raise_signal(&wq_sig1);
-    raise_signal(&wq_sig2);
-    raise_signal(&wq_sig3);
-    raise_signal(&wq_sig4);
-    raise_signal(&wq_sig5);
-    raise_signal(&wq_sig6);
-    raise_signal(&wq_sig7);
+    if (ctx() > 1 && ctx() < 6) {
+        /* Raised wq signals to signal that batch_out is available */
+        raise_signal(&wq_sig0);
+        raise_signal(&wq_sig1);
+        raise_signal(&wq_sig2);
+        raise_signal(&wq_sig3);
+        raise_signal(&wq_sig4);
+        raise_signal(&wq_sig5);
+        raise_signal(&wq_sig6);
+        raise_signal(&wq_sig7);
+    }
 
     /* Initialize head timer, and align it to slots */
     pq_head_time = get_current_time() & ~((uint64_t)PQ_SLOT_TICKS - 1ull);
@@ -724,15 +740,16 @@ do {                                                                         \
                                                     PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
         /* Ensure packet is not enqueued to far in future */                 \
-        if (delta_slots >= 192) delta_slots = 192;                           \
+        if (delta_slots >= PQ_TRESH_FUTURE_SLOTS)                            \
+            delta_slots = PQ_TRESH_FUTURE_SLOTS;                             \
                                                                              \
-        /* Find actual slot to enqueue in relation to head */                \
-        pq_index = pq_head + delta_slots;                                    \
-        if (pq_index >= PQ_LENGTH) pq_index -= PQ_LENGTH;                    \
+        /* Find desired (CTM) slot to enqueue in relation to head */         \
+        pq_d_index = pq_ctm_head + delta_slots;                              \
+        if (pq_d_index >= PQ_CTM_LENGTH) pq_d_index -= PQ_CTM_LENGTH;        \
                                                                              \
         /* -------------- Find next available index ------------------ */    \
-        bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;                  \
-        index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;                 \
+        bitmask_index = pq_d_index >> INDEX_TO_BITMASK_SHIFT;                \
+        index_in_bitmask = pq_d_index & INDEX_IN_BITMASK_MASK;               \
                                                                              \
         /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
         for (i = 0; i < 3; i++) {                                            \
@@ -756,30 +773,73 @@ do {                                                                         \
             /* New bitmask to check */                                       \
             index_in_bitmask = 0;                                            \
             bitmask_index++;                                                 \
-            if (bitmask_index >= BITMASKS_LENGTH) bitmask_index = 0;         \
+            if (bitmask_index >= PQ_BITMASKS_LENGTH) bitmask_index = 0;      \
         }                                                                    \
         /* No slot found within 64-96 slots of initial */                    \
         halt();                                                              \
                                                                              \
         found_slot##_n:;                                                     \
                                                                              \
+        /* Update delta_slots to reflect found slot */                       \
+        {                                                                    \
+            unsigned int diff;                                               \
+            if (pq_index >= pq_d_index) diff = pq_index - pq_d_index;        \
+            else diff = (PQ_CTM_LENGTH + pq_index) - pq_d_index;             \
+                                                                             \
+            delta_slots += diff;                                             \
+        }                                                                    \
+                                                                             \
         /* --------- Place packet in queue -------------- */                 \
                                                                              \
-        /* Place packet in next available slot in pacing queue */            \
-        pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];             \
-        pacing_queue[pq_index].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] |   \
-                                            notify_reset_state_gpr);         \
-        pacing_queue[pq_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
-        /* k_pace: Zero vlan / l3_offset */                                  \
-        pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3] &    \
-                                            0xFFFF0000;                      \
-                                                                             \
-        /* Add index to bitmasks */                                          \
-        bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |= (1u <<               \
-                                        (pq_index & INDEX_IN_BITMASK_MASK)); \
-        /* Update departure time of flow */                                  \
+        /* Reflect that packet is enqueued by updating bitmask */            \
+        /*  and last departure time of flow */                               \
+        bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=                      \
+                                (1u << (pq_index & INDEX_IN_BITMASK_MASK));  \
         flows_prev_dep_time[flow_id] = dep_time;                             \
-        /* TODO: adjust departure time to reflect which index we actually got */ \
+                                                                             \
+        /* Place packet directly in lmem if close departure time */          \
+        if (delta_slots < (PQ_LM_LENGTH-pq_lm_dequeue_cnt)) {                \
+            /* convert index to lmem */                                      \
+            pq_index = (pq_lm_head + delta_slots);                           \
+            if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;          \
+                                                                                \
+            /* Place packet in next available slot in pacing queue */           \
+            lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];         \
+            lm_pacing_queue[pq_index].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] \
+                                                    | notify_reset_state_gpr);  \
+            lm_pacing_queue[pq_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2]; \
+            /* k_pace: Zero vlan / l3_offset */                                 \
+            lm_pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3]  \
+                                                    &  0xFFFF0000;              \
+                                                                                \
+            /* mark lmem slot as occupied, to prevent sync from overwriting */  \
+            lm_bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=                  \
+                                (1u <<  (pq_index & INDEX_IN_BITMASK_MASK));    \
+        } else {                                                                \
+            /* -------- Send packet to CTM -------- */                          \
+            __ctm40 void *ctm_ptr;                                              \
+            unsigned int addr_hi, addr_lo;                                      \
+                                                                                \
+            /* Prepare batch out */                                             \
+            batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];             \
+            batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1]     \
+                                                    | notify_reset_state_gpr);  \
+            batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
+            /* k_pace: Zero vlan / l3_offset */                                 \
+            batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3]      \
+                                                    &  0xFFFF0000;              \
+                                                                                \
+            /* Write packet to CTM */                                           \
+            /* TODO: use least recently used batch out */                       \
+            ctm_ptr = &ctm_pacing_queue[pq_index];                              \
+            addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;          \
+            addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);               \
+            __asm {                                                             \
+                mem[write, batch_out.pkt##_pkt##, addr_hi, <<8, addr_lo,        \
+                                __ct_const_val(2)], sig_done[*wq_sig##_pkt]     \
+            }                                                                   \
+        }                                                                       \
+                                                                             \
                                                                              \
     } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
         /* else LSO packets */                                               \
@@ -800,6 +860,7 @@ do {                                                                         \
                          sizeof(lso_pkt), sig_done, &lso_sig_pair);          \
             wait_sig_mask(lso_wait_msk);                                     \
             __implicit_read(&lso_sig_pair.even);                             \
+            __implicit_read(&wq_sig##_pkt);                                  \
             while (signal_test(&lso_sig_pair.odd)) {                         \
                 /* Ring get failed, retry */                                 \
                 lso_ring_get(lso_ring_num, lso_ring_addr, lso_xnum,          \
@@ -836,17 +897,6 @@ do {                                                                         \
             /* We can carry on processing the descriptor */                  \
             /* Check whether it should go to the app */                      \
             if (lso_pkt.desc.eop) {                                          \
-                /* XXX always check the MU pointer in LSO handling. */       \
-                if ((lso_pkt.desc.__raw[1] & NFD_MU_PTR_DBG_MSK) == 0) {     \
-                    /* Write the error we read to Mailboxes */               \
-                    /* for debug purposes */                                 \
-                    local_csr_write(local_csr_mailbox_0,                     \
-                                    NFD_IN_NOTIFY_MU_PTR_INVALID);           \
-                    local_csr_write(local_csr_mailbox_1,                     \
-                                    lso_pkt.desc.__raw[1]);                  \
-                                                                             \
-                    halt();                                                  \
-                }                                                            \
                                                                              \
                 pkt_desc_tmp.is_nfd = lso_pkt.desc.eop;                      \
                 pkt_desc_tmp.offset = lso_pkt.desc.offset;                   \
@@ -862,15 +912,16 @@ do {                                                                         \
                                                     PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
                 /* Ensure packet is not enqueued to far in future */         \
-                if (delta_slots >= 192) delta_slots = 192;                   \
+                if (delta_slots >= PQ_TRESH_FUTURE_SLOTS)                    \
+                    delta_slots = PQ_TRESH_FUTURE_SLOTS;                     \
                                                                              \
-                /* Find actual slot to enqueue in relation to head */        \
-                pq_index = pq_head + delta_slots;                            \
-                if (pq_index >= PQ_LENGTH) pq_index -= PQ_LENGTH;            \
+                /* Find desired (CTM) slot to enqueue in relation to head */ \
+                pq_d_index = pq_ctm_head + delta_slots;                      \
+                if (pq_d_index >= PQ_CTM_LENGTH) pq_d_index -= PQ_CTM_LENGTH;\
                                                                              \
                 /* -------------- Find next available index ------- */       \
-                bitmask_index = pq_index >> INDEX_TO_BITMASK_SHIFT;          \
-                index_in_bitmask = pq_index & INDEX_IN_BITMASK_MASK;         \
+                bitmask_index = pq_d_index >> INDEX_TO_BITMASK_SHIFT;        \
+                index_in_bitmask = pq_d_index & INDEX_IN_BITMASK_MASK;       \
                                                                              \
                 /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
                 for (i = 0; i < 3; i++) {                                    \
@@ -894,42 +945,83 @@ do {                                                                         \
                     /* New bitmask to check */                               \
                     index_in_bitmask = 0;                                    \
                     bitmask_index++;                                         \
-                    if (bitmask_index >= BITMASKS_LENGTH) bitmask_index = 0; \
+                    if (bitmask_index >= PQ_BITMASKS_LENGTH)                 \
+                        bitmask_index = 0;                                   \
                 }                                                            \
                 /* No slot found within 64-96 slots of initial */            \
                 halt();                                                      \
                                                                              \
                 found_slot_lso##_n:;                                         \
                                                                              \
+                /* Update delta_slots to reflect found slot */               \
+                {                                                            \
+                    unsigned int diff;                                       \
+                    if (pq_index >= pq_d_index) diff = pq_index - pq_d_index;\
+                    else diff = (PQ_CTM_LENGTH + pq_index) - pq_d_index;     \
+                                                                             \
+                    delta_slots += diff;                                     \
+                }                                                            \
+                                                                             \
                 /* --------- Place packet in queue -------------- */         \
                                                                              \
-                /* Place packet in next available slot in pacing queue */    \
-                pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];     \
-                pacing_queue[pq_index].__raw[1] = (lso_pkt.desc.__raw[1] |   \
-                                                    notify_reset_state_gpr); \
-                pacing_queue[pq_index].__raw[2] = lso_pkt.desc.__raw[2];     \
-                /* k_pace: Zero vlan / l3_offset */                          \
-                pacing_queue[pq_index].__raw[3] = lso_pkt.desc.__raw[3] &    \
-                                                    0xFFFF0000;              \
+                /* Reflect that packet is enqueued by updating bitmask */    \
+                bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=              \
+                                (1u << (pq_index & INDEX_IN_BITMASK_MASK));  \
                                                                              \
-                /* Add index to bitmasks */                                  \
-                bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |= (1u <<       \
-                                        (pq_index & INDEX_IN_BITMASK_MASK)); \
+                /* Place packet directly in lmem if close departure time */  \
+                if (delta_slots < (PQ_LM_LENGTH-pq_lm_dequeue_cnt)) {        \
+                    /* convert index to lmem */                              \
+                    pq_index = (pq_lm_head + delta_slots);                   \
+                    if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;  \
+                                                                             \
+                    /* Place packet in next available slot in pacing queue */   \
+                    lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0]; \
+                    lm_pacing_queue[pq_index].__raw[1] = (lso_pkt.desc.__raw[1] \
+                                                |  notify_reset_state_gpr);     \
+                    lm_pacing_queue[pq_index].__raw[2] = lso_pkt.desc.__raw[2]; \
+                    /* k_pace: Zero vlan / l3_offset */                         \
+                    lm_pacing_queue[pq_index].__raw[3] = lso_pkt.desc.__raw[3]  \
+                                                       & 0xFFFF0000;            \
+                                                                                \
+                    /* mark lmem slot as occupied, (prev sync from ovrwrt) */   \
+                    lm_bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=          \
+                                (1u <<  (pq_index & INDEX_IN_BITMASK_MASK));    \
+                } else {                                                        \
+                    /* -------- Send packet to CTM -------- */                  \
+                    __ctm40 void *ctm_ptr;                                      \
+                    unsigned int addr_hi, addr_lo;                              \
+                                                                                \
+                    /* Prepare batch out */                                     \
+                    batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];     \
+                    batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1]     \
+                                                |  notify_reset_state_gpr);     \
+                    batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];     \
+                    /* k_pace: Zero vlan / l3_offset */                         \
+                    batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3]      \
+                                                       & 0xFFFF0000;            \
+                                                                                \
+                    /* Write packet to CTM */                                   \
+                    /* TODO: use least recently used batch out */               \
+                    ctm_ptr = &ctm_pacing_queue[pq_index];                      \
+                    addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;  \
+                    addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);       \
+                    __asm {                                                     \
+                        mem[write, batch_out.pkt##_pkt##, addr_hi, <<8, addr_lo,\
+                                    __ct_const_val(2)], sig_done[*wq_sig##_pkt] \
+                    }                                                           \
+
+                    /* Ensure next lso get waits until CTM write complete */
+                    lso_wait_msk |= __signals(&wq_sig##_pkt);
+                }                                                               \
                                                                              \
                 /* update departure time of next packet in tso chunk */      \
                 dep_time += ipg_ticks;                                       \
                                                                              \
             } else {                                                         \
-                                                                             \
-                /* XXX lso_pkt.desc.lso must be NFD_IN_ISSUED_DESC_LSO_RET */ \
-                /* else we have a logic bug or ring corruption */            \
-                if (lso_pkt.desc.lso != NFD_IN_ISSUED_DESC_LSO_RET) {        \
-                    local_csr_write(local_csr_mailbox_0,                     \
-                                    NFD_IN_NOTIFY_LSO_DESC_INVALID);         \
-                    local_csr_write(local_csr_mailbox_1,                     \
-                                    lso_pkt.desc.__raw[0]);                  \
-                    halt();                                                  \
-                }                                                            \
+                /* Remove the wq signal from the wait mask */                \
+                /* XXX flag the wq_sig as written for live range tracking */ \
+                wait_msk &= ~__signals(&wq_sig##_pkt);                       \
+                __implicit_write(&wq_sig##_pkt);                             \
             }                                                                \
                                                                              \
             /* if it is last LSO being read from ring */                     \
@@ -942,6 +1034,11 @@ do {                                                                         \
                 break;                                                       \
             }                                                                \
         }                                                                    \
+    } else {                                                                 \
+        /* Remove the wq signal from the wait mask */                        \
+        /* XXX flag the wq_sig as written for live range tracking */         \
+        wait_msk &= ~__signals(&wq_sig##_pkt);                               \
+        __implicit_write(&wq_sig##_pkt);                                     \
     }                                                                        \
 } while (0)
 
@@ -973,12 +1070,24 @@ _notify(__shared __gpr unsigned int *complete,
 
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
-    uint32_t flow_id, ipg_ticks, pq_index, delta_slots;
+    uint32_t flow_id, ipg_ticks, pq_index, pq_d_index, delta_slots;
     uint32_t bitmask_index, index_in_bitmask, bitmask, i;
     uint64_t dep_time, curtime;
 
     /* Reorder before potentially issuing a ring get */
     wait_for_all(&get_order_sig);
+
+    /* temp hold for sync/dequeue threads */
+    if (ctx() < 6) {
+        reorder_done_opt(&next_ctx, &get_order_sig);
+
+        /* do dequeue/sync */
+
+        wait_for_all(&msg_order_sig);
+        reorder_done_opt(&next_ctx, &msg_order_sig);
+
+        return;
+    }
 
     /* There is a FULL batch to process
      * XXX assume that issue_dma inc's dma seq for each nfd_in_issued_desc in
@@ -1003,7 +1112,17 @@ _notify(__shared __gpr unsigned int *complete,
             alu[*served, *served, +, NFD_IN_MAX_BATCH_SZ];
         }
 
-        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
+        wait_msk = __signals(&wq_sig0, &wq_sig1, &wq_sig2, &wq_sig3,
+                             &wq_sig4, &wq_sig5, &wq_sig6, &wq_sig7,
+                             &qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
+        __implicit_read(&wq_sig0);
+        __implicit_read(&wq_sig1);
+        __implicit_read(&wq_sig2);
+        __implicit_read(&wq_sig3);
+        __implicit_read(&wq_sig4);
+        __implicit_read(&wq_sig5);
+        __implicit_read(&wq_sig6);
+        __implicit_read(&wq_sig7);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
@@ -1062,6 +1181,14 @@ _notify(__shared __gpr unsigned int *complete,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
         wait_sig_mask(wait_msk);
+        __implicit_read(&wq_sig0);
+        __implicit_read(&wq_sig1);
+        __implicit_read(&wq_sig2);
+        __implicit_read(&wq_sig3);
+        __implicit_read(&wq_sig4);
+        __implicit_read(&wq_sig5);
+        __implicit_read(&wq_sig6);
+        __implicit_read(&wq_sig7);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_order_sig);
@@ -1073,7 +1200,7 @@ _notify(__shared __gpr unsigned int *complete,
         n_batch = batch_in.pkt0.num_batch;
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
-        wait_msk = __signals(&msg_sig0);
+        wait_msk = __signals(&msg_sig0, &wq_sig0);
 
         /* Interface and queue info is the same for all packets in batch */
         pkt_desc_tmp.intf = PCIE_ISL;
@@ -1111,7 +1238,9 @@ _notify(__shared __gpr unsigned int *complete,
             }
 
             wait_sig_mask(wait_msk);
+            __implicit_read(&wq_sig0);
             __implicit_read(&msg_sig0);
+            wait_msk |= __signals(&wq_sig0);
         }
 
         /* We have finished fetching the messages from the ring.
@@ -1122,12 +1251,13 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* Wait for the last get to complete */
         wait_sig_mask(wait_msk);
+        __implicit_read(&wq_sig0);
         __implicit_read(&msg_sig0);
 
         /* Set up wait_msk to process a full batch next */
         /* XXX Assume we will do a WQ put, _NOTIFY_PROC will clear
            wq_sig0 if necessary */
-        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig,
+        wait_msk = __signals(&wq_sig0, &msg_sig0, &msg_sig1, &qc_sig,
                              &msg_order_sig);
 
         /* Process the final descriptor from the batch */
@@ -1150,9 +1280,6 @@ _notify(__shared __gpr unsigned int *complete,
         wait_for_all(&msg_order_sig);
         reorder_done_opt(&next_ctx, &msg_order_sig);
     }
-
-    /* Dequeue all packets which should be sent */
-    dequeue_pacing_queue();
 }
 
 
