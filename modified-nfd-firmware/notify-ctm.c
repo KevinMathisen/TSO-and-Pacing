@@ -333,7 +333,7 @@ do {                                                                    \
     batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];     \
                                                                         \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
-                            out_msg_sz_2, out_msg_sz, sig_done,         \
+                            out_msg_sz, out_msg_sz, sig_done,           \
                             &wq_sig##_pkt);                             \
                                                                         \
 } while (0)
@@ -808,7 +808,7 @@ _notify(__shared __gpr unsigned int *complete,
     if (_ctx == 2 || _ctx == 3 || _ctx == 4 || _ctx == 5) {
         reorder_done_opt(&next_ctx, &get_order_sig);
 
-        dequeue_pacing_queue();
+        DEQUEUE_PACING_QUEUE();
 
         wait_for_all(&msg_order_sig);
         reorder_done_opt(&next_ctx, &msg_order_sig);
