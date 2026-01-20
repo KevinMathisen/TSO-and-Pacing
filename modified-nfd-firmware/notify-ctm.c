@@ -322,19 +322,19 @@ do {                                                                    \
     if (pq_ctm_head == PQ_CTM_LENGTH) pq_ctm_head = 0;                  \
                                                                         \
     __asm {                                                             \
-        mem[read, batch_in->pkt##_pkt##, addr_hi, <<8, addr_lo,          \
+        mem[read, batch_in.pkt##_pkt##, addr_hi, <<8, addr_lo,          \
                         __ct_const_val(2)], ctx_swap[*wq_sig##_pkt]     \
     }                                                                   \
                                                                         \
     /* Packet retrived, send it to the work queue in EMEM */            \
                                                                         \
-    batch_out.pkt##_pkt##.__raw[0] = batch_in->pkt##_pkt##.__raw[0];     \
-    batch_out.pkt##_pkt##.__raw[1] = batch_in->pkt##_pkt##.__raw[1];     \
-    batch_out.pkt##_pkt##.__raw[2] = batch_in->pkt##_pkt##.__raw[2];     \
-    batch_out.pkt##_pkt##.__raw[3] = batch_in->pkt##_pkt##.__raw[3];     \
+    batch_out.pkt##_pkt##.__raw[0] = batch_in.pkt##_pkt##.__raw[0];     \
+    batch_out.pkt##_pkt##.__raw[1] = batch_in.pkt##_pkt##.__raw[1];     \
+    batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
+    batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];     \
                                                                         \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,         \
-                            out_msg_sz_2, out_msg_sz_2, sig_done,       \
+                            out_msg_sz_2, out_msg_sz, sig_done,         \
                             &wq_sig##_pkt);                             \
                                                                         \
 } while (0)
@@ -343,54 +343,52 @@ do {                                                                    \
  * Dequeue up to batch of packets and send to work queue
  *
  */
-__intrinsic void
-dequeue_pacing_queue(__xread struct _issue_pkt_batch *batch_in) {
-    uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
-    __ctm40 void *ctm_ptr;
-    unsigned int addr_hi, addr_lo;
-
-    /* We are not done until no packets to send (pq_ctm_len == 0), 
-       or have used (all) batch_out */
-    while (next_batch_out != 8) {
-        
-        /* Check if any slots are due for departure */
-        if (pq_ctm_len == 0) return;
-
-        /* Wait until the least recently used batch_out._pkt is available to write
-           (this will check if signal raised, but not clear it) */
-        switch (next_batch_out) {
-            case 0: wait_for_any(&wq_sig0); break;
-            case 1: wait_for_any(&wq_sig1); break;
-            case 2: wait_for_any(&wq_sig2); break;
-            case 3: wait_for_any(&wq_sig3); break;
-            case 4: wait_for_any(&wq_sig4); break;
-            case 5: wait_for_any(&wq_sig5); break;
-            case 6: wait_for_any(&wq_sig6); break;
-            case 7: wait_for_any(&wq_sig7); break;
-        }
-
-        /* Wait is done, so we can dequeue. Need to check if we should still dequeue 
-           (as head may have been moved while we waited) */
-        if (pq_ctm_len == 0) return;
-
-        pq_ctm_len--;
-
-        switch (next_batch_out) {
-            case 0: _DEQUEUE_PROC(0); break;
-            case 1: _DEQUEUE_PROC(1); break;
-            case 2: _DEQUEUE_PROC(2); break;
-            case 3: _DEQUEUE_PROC(3); break;
-            case 4: _DEQUEUE_PROC(4); break;
-            case 5: _DEQUEUE_PROC(5); break;
-            case 6: _DEQUEUE_PROC(6); break;
-            case 7: _DEQUEUE_PROC(7); break;
-        }
-
-        next_batch_out++;
-    }
-
-    next_batch_out = 0;
-}
+#define DEQUEUE_PACING_QUEUE(_batch)                                    \
+do {                                                                    \
+                                                                        \
+    /* We are not done until no packets to send (pq_ctm_len == 0), */      \
+    /*   or have used (all) batch_out */                                  \
+    while (next_batch_out != 8) {                                       \
+                                                                        \
+        /* Check if any slots are due for departure */                  \
+        if (pq_ctm_len == 0) goto done_dequeue;                         \
+                                                                        \
+        /* Wait until the least recently used batch_out._pkt is available to write */ \
+        /*   (this will check if signal raised, but not clear it) */      \
+        switch (next_batch_out) {                                       \
+            case 0: wait_for_any(&wq_sig0); break;                      \
+            case 1: wait_for_any(&wq_sig1); break;                      \
+            case 2: wait_for_any(&wq_sig2); break;                      \
+            case 3: wait_for_any(&wq_sig3); break;                      \
+            case 4: wait_for_any(&wq_sig4); break;                      \
+            case 5: wait_for_any(&wq_sig5); break;                      \
+            case 6: wait_for_any(&wq_sig6); break;                      \
+            case 7: wait_for_any(&wq_sig7); break;                      \
+        }                                                               \
+                                                                        \
+        /* Wait is done, so we can dequeue. Need to check if we should still dequeue */ \
+        /* (as head may have been moved while we waited) */             \
+        if (pq_ctm_len == 0) goto done_dequeue;                         \
+                                                                        \
+        pq_ctm_len--;                                                   \
+                                                                        \
+        switch (next_batch_out) {                                       \
+            case 0: _DEQUEUE_PROC(0); break;                            \
+            case 1: _DEQUEUE_PROC(1); break;                            \
+            case 2: _DEQUEUE_PROC(2); break;                            \
+            case 3: _DEQUEUE_PROC(3); break;                            \
+            case 4: _DEQUEUE_PROC(4); break;                            \
+            case 5: _DEQUEUE_PROC(5); break;                            \
+            case 6: _DEQUEUE_PROC(6); break;                            \
+            case 7: _DEQUEUE_PROC(7); break;                            \
+        }                                                               \
+                                                                        \
+        next_batch_out++;                                               \
+    }                                                                   \
+                                                                        \
+    next_batch_out = 0;                                                 \
+    done_dequeue: ;                                                     \
+} while(0)
 
 
 __intrinsic void
@@ -811,7 +809,7 @@ _notify(__shared __gpr unsigned int *complete,
     if (_ctx == 2 || _ctx == 3 || _ctx == 4 || _ctx == 5) {
         reorder_done_opt(&next_ctx, &get_order_sig);
 
-        dequeue_pacing_queue(&batch_in);
+        dequeue_pacing_queue();
 
         wait_for_all(&msg_order_sig);
         reorder_done_opt(&next_ctx, &msg_order_sig);
