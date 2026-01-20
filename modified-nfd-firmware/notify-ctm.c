@@ -283,10 +283,9 @@ __shared __gpr uint32_t debug_calls = 0;
     if (debug_index < 200) { \
         if (debug_calls < 400) { \
             wait_for_any(&wq_sig7); \
-            SIGNAL debug_sig;    \
             batch_out.pkt7.__raw[3] = _a; \
-            __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
-            while (!signal_test(&debug_sig));  \
+            __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &wq_sig7); \
+            while (!signal_test(&wq_sig7));  \
             debug_index += 1; \
             debug_calls += 1; \
         } \
