@@ -272,7 +272,6 @@ __export __emem uint32_t wire_debug[1024*1024];
 __export __emem uint32_t wire_debug_idx;
 
 __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append debug info to.
-__shared __gpr uint32_t debug_calls = 0;
 
 /*
  * Write a 32-bit words to EMEM for debugging, without swapping contexts.
@@ -281,15 +280,11 @@ __shared __gpr uint32_t debug_calls = 0;
 */
 #define DEBUG(_a) do { \
     if (debug_index < 200) { \
-        if (debug_calls < 400) { \
-            wait_for_any(&wq_sig7); \
-            SIGNAL debug_sig;    \
-            batch_out.pkt7.__raw[3] = _a; \
-            __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &debug_sig); \
-            while (!signal_test(&debug_sig));  \
-            debug_index += 1; \
-            debug_calls += 1; \
-        } \
+        wait_for_all(&wq_sig7); \
+        batch_out.pkt7.__raw[3] = _a; \
+        __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &wq_sig7); \
+        while (!signal_test(&wq_sig7));  \
+        debug_index += 1; \
     } \
  } while(0)
 
