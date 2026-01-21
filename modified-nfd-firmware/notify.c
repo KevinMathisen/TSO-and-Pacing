@@ -429,28 +429,33 @@ sync_ctm_lm() {
     /* Need more than 8 slots to sync! */
     if (pq_lm_dequeue_cnt < 8) return;
 
-    // save where we want to write to in lm
+    // Save where we want to write to in lm
     old_pq_lm_sync_end = pq_lm_sync_end;
 
     // Issue read from CTM to batch_in
     ctm_ptr = &ctm_pacing_queue[pq_ctm_sync_end];
     addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;
     addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);
-
     __asm {
-        mem[read, batch_in, addr_hi, <<8, addr_lo,
-                        __ct_const_val(16)], sig_done[*msg_sig0]
+        mem[read, batch_in.pkt0, addr_hi, <<8, addr_lo, __ct_const_val(8)], \
+                        sig_done[*msg_sig0];
+    }
+    ctm_ptr = &ctm_pacing_queue[pq_ctm_sync_end+4];
+    addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;
+    addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);
+    __asm {
+        mem[read, batch_in.pkt4, addr_hi, <<8, addr_lo, __ct_const_val(8)], \
+                        sig_done[*msg_sig1];
     }
 
-    // update pointers to "reserve" these 8 slots for us
+    // Update pointers to "reserve" these 8 slots for us
     pq_lm_dequeue_cnt -= 8;
     pq_lm_sync_end += 8;
     if (pq_lm_sync_end >= PQ_LM_LENGTH) pq_lm_sync_end -= PQ_LM_LENGTH;
     pq_ctm_sync_end += 8;
     if (pq_ctm_sync_end >= PQ_CTM_LENGTH) pq_ctm_sync_end -= PQ_CTM_LENGTH;
 
-    // yield waiting for read to complete
-    wait_for_all(&msg_sig0);
+    wait_for_all(&msg_sig0, &msg_sig1);
 
     // Place 8 slots in batch_in to LM
     bitmask = lm_bitmasks[old_pq_lm_sync_end >> INDEX_TO_BITMASK_SHIFT];
@@ -1005,6 +1010,8 @@ sync_dequeue_loop() {
     /* Participate in msg ordering */
     wait_for_all(&msg_order_sig);
     reorder_done_opt(&next_ctx, &msg_order_sig);
+
+    dequeue_pacing_queue();
 }
 
 /**
