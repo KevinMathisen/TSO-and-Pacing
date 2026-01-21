@@ -107,7 +107,6 @@ static SIGNAL_MASK wait_msk;
 static unsigned int next_ctx;
 
 __xwrite struct _pkt_desc_batch batch_out;
-__xread struct _issued_pkt_batch batch_in;
 
 #ifdef NFD_IN_LSO_CNTR_ENABLE
 static unsigned int nfd_in_lso_cntr_addr = 0;
@@ -412,10 +411,7 @@ do {                                                                        \
                                                                             \
     /* If we dont overwrite packet in lm, insert slot to lm */              \
     if (!( (bitmask >> (lm_index & INDEX_IN_BITMASK_MASK)) & 1u )) {        \
-        lm_pacing_queue[lm_index].__raw[0] = batch_in.pkt##_pkt##.__raw[0]; \
-        lm_pacing_queue[lm_index].__raw[1] = batch_in.pkt##_pkt##.__raw[1]; \
-        lm_pacing_queue[lm_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2]; \
-        lm_pacing_queue[lm_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3]; \
+        lm_pacing_queue[lm_index] = batch_in.pkt##_pkt##;                   \
     }                                                                       \
                                                                             \
 } while (0)
@@ -429,6 +425,8 @@ sync_ctm_lm() {
     uint32_t bitmask;
     __ctm40 void *ctm_ptr;
     unsigned int old_pq_lm_sync_end, addr_hi, addr_lo, lm_index;
+
+    __xread struct _pkt_desc_batch batch_in;
 
     /* Need more than 8 slots to sync! */
     if (pq_lm_dequeue_cnt < 8) return;
@@ -491,10 +489,8 @@ do {                                                                        \
     __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }                  \
     __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }                   \
                                                                             \
+    batch_out.pkt##_pkt## = lm_pacing_queue[pq_lm_head];                    \
     batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                             \
-    batch_out.pkt##_pkt##.__raw[1] = lm_pacing_queue[pq_lm_head].__raw[1];  \
-    batch_out.pkt##_pkt##.__raw[2] = lm_pacing_queue[pq_lm_head].__raw[2];  \
-    batch_out.pkt##_pkt##.__raw[3] = lm_pacing_queue[pq_lm_head].__raw[3];  \
                                                                             \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,             \
                             out_msg_sz_2, out_msg_sz_2, sig_done,           \
@@ -1117,6 +1113,7 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int qc_queue;
     unsigned int num_avail;
 
+    __xread struct _issued_pkt_batch batch_in;
     struct nfd_in_pkt_desc pkt_desc_tmp;
 
     /* K_pace: variables we use to enqueue */
