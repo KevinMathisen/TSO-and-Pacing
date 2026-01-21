@@ -107,6 +107,7 @@ static SIGNAL_MASK wait_msk;
 static unsigned int next_ctx;
 
 __xwrite struct _pkt_desc_batch batch_out;
+__xread struct _issued_pkt_batch batch_in;
 
 #ifdef NFD_IN_LSO_CNTR_ENABLE
 static unsigned int nfd_in_lso_cntr_addr = 0;
@@ -397,6 +398,71 @@ raise_signal(SIGNAL *sig)
             NFP_MECSR_SAME_ME_SIGNAL_CTX(ctx);
     local_csr_write(local_csr_same_me_signal, val);
     __implicit_write(sig);
+}
+
+#define _BATCH_IN_TO_LM(_pkt)                                               \
+do {                                                                        \
+    /* TODO: may only copy slots with packet in bitmask */                  \
+                                                                            \
+    lm_index = old_pq_lm_sync_end+_pkt;                                     \
+                                                                            \
+    /* If we dont overwrite packet in lm, insert slot to lm */              \
+    if (!( (bitmask >> (lm_index & INDEX_IN_BITMASK_MASK)) & 1u )) {        \
+        lm_pacing_queue[lm_index].__raw[0] = batch_in.pkt##_pkt##.__raw[0]; \
+        lm_pacing_queue[lm_index].__raw[1] = batch_in.pkt##_pkt##.__raw[1]; \
+        lm_pacing_queue[lm_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2]; \
+        lm_pacing_queue[lm_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3]; \
+    }                                                                       \
+                                                                            \
+} while (0)
+
+/**
+ * Sync 8 slots from CTM to LM if needed
+ *
+ */
+__intrinsic void
+sync_ctm_lm() {
+    uint32_t bitmask;
+    __ctm40 void *ctm_ptr;
+    unsigned int old_pq_lm_sync_end, addr_hi, addr_lo, lm_index;
+
+    /* Need more than 8 slots to sync! */
+    if (pq_lm_dequeue_cnt < 8) return;
+
+    // save where we want to write to in lm
+    old_pq_lm_sync_end = pq_lm_sync_end;
+
+    // Issue read from CTM to batch_in
+    ctm_ptr = &ctm_pacing_queue[pq_ctm_sync_end];
+    addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;
+    addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);
+
+    __asm {
+        mem[read, batch_in, addr_hi, <<8, addr_lo,
+                        __ct_const_val(16)], sig_done[*msg_sig0]
+    }
+
+    // update pointers to "reserve" these 8 slots for us
+    pq_lm_dequeue_cnt -= 8;
+    pq_lm_sync_end += 8;
+    if (pq_lm_sync_end >= PQ_LM_LENGTH) pq_lm_sync_end -= PQ_LM_LENGTH;
+    pq_ctm_sync_end += 8;
+    if (pq_ctm_sync_end >= PQ_CTM_LENGTH) pq_ctm_sync_end -= PQ_CTM_LENGTH;
+
+    // yield waiting for read to complete
+    wait_for_all(&msg_sig0);
+
+    // Place 8 slots in batch_in to LM
+    bitmask = lm_bitmasks[old_pq_lm_sync_end >> INDEX_TO_BITMASK_SHIFT];
+
+    _BATCH_IN_TO_LM(0);
+    _BATCH_IN_TO_LM(1);
+    _BATCH_IN_TO_LM(2);
+    _BATCH_IN_TO_LM(3);
+    _BATCH_IN_TO_LM(4);
+    _BATCH_IN_TO_LM(5);
+    _BATCH_IN_TO_LM(6);
+    _BATCH_IN_TO_LM(7);
 }
 
 /* --------------------------------------------------- */
@@ -928,6 +994,18 @@ do {                                                                         \
     }                                                                        \
 } while (0)
 
+__intrinsic void
+sync_dequeue_loop() {
+    wait_for_all(&get_order_sig);
+    /* Participate in ctm_ring_get ordering */
+    reorder_done_opt(&next_ctx, &get_order_sig);
+
+    sync_ctm_lm();
+
+    /* Participate in msg ordering */
+    wait_for_all(&msg_order_sig);
+    reorder_done_opt(&next_ctx, &msg_order_sig);
+}
 
 /**
  * Dequeue a batch of "issue_dma" messages and process that batch, incrementing
@@ -951,7 +1029,6 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int qc_queue;
     unsigned int num_avail;
 
-    __xread struct _issued_pkt_batch batch_in;
     struct nfd_in_pkt_desc pkt_desc_tmp;
 
     /* K_pace: variables we use to enqueue */
@@ -962,18 +1039,6 @@ _notify(__shared __gpr unsigned int *complete,
 
     /* Reorder before potentially issuing a ring get */
     wait_for_all(&get_order_sig);
-
-    /* temp hold for sync/dequeue threads */
-    if (ctx() < 6) {
-        reorder_done_opt(&next_ctx, &get_order_sig);
-
-        /* do dequeue/sync */
-
-        wait_for_all(&msg_order_sig);
-        reorder_done_opt(&next_ctx, &msg_order_sig);
-
-        return;
-    }
 
     /* There is a FULL batch to process
      * XXX assume that issue_dma inc's dma seq for each nfd_in_issued_desc in
@@ -1309,9 +1374,13 @@ main(void)
                 notify_manager_reorder();
                 distr_notify(0);
             }
-        } else {
+        } else if (ctx() == 2) {
             for (;;) {
                 notify(0);
+            }
+        } else {
+            for (;;) {
+                sync_dequeue_loop();
             }
         }
 #else
@@ -1331,9 +1400,13 @@ main(void)
                 notify_manager_reorder();
                 distr_notify(1);
             }
-        } else {
+        } else if (ctx() == 3) {
             for (;;) {
                 notify(1);
+            }
+        } else {
+            for (;;) {
+                sync_dequeue_loop();
             }
         }
 #else
