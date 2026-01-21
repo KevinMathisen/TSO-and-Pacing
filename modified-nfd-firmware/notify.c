@@ -589,6 +589,42 @@ dequeue_pacing_queue() {
     next_batch_out = 0;
 }
 
+__intrinsic uint32_t
+pq_find_next_available_slot(uint32_t pq_d_index)
+{
+    uint32_t bitmask, i;
+    uint32_t bitmask_index = pq_d_index >> INDEX_TO_BITMASK_SHIFT;
+    uint32_t index_in_bitmask = pq_d_index & INDEX_IN_BITMASK_MASK;
+
+    for (i = 0; i < 3; i++) {
+        bitmask = ~bitmasks[bitmask_index];              /* 1 = available */
+
+        /* Ignore bits below start index for first bitmask */
+        bitmask &= (~0u << index_in_bitmask); 
+
+        /* There is atleast one available space this bitmask */
+        /* Go through bitmask until we find the slot */
+        if (bitmask) {
+            index_in_bitmask = 0;
+            while ((bitmask & 1u) == 0) {
+                bitmask >>= 1;
+                index_in_bitmask++;
+            }
+            return (bitmask_index << INDEX_TO_BITMASK_SHIFT) + index_in_bitmask;
+        }
+
+        /* New bitmask to check */
+        index_in_bitmask = 0;
+        bitmask_index++;
+        if (bitmask_index >= PQ_BITMASKS_LENGTH)
+            bitmask_index = 0;
+    }
+
+    /* No slot found within 64-96 slots of initial */
+    halt();
+    return 0;
+}
+
 /* --------------------------------------------------- */
 
 /* XXX Move to some sort of CT reflect library */
@@ -823,37 +859,7 @@ do {                                                                         \
         if (pq_d_index >= PQ_CTM_LENGTH) pq_d_index -= PQ_CTM_LENGTH;        \
                                                                              \
         /* -------------- Find next available index ------------------ */    \
-        bitmask_index = pq_d_index >> INDEX_TO_BITMASK_SHIFT;                \
-        index_in_bitmask = pq_d_index & INDEX_IN_BITMASK_MASK;               \
-                                                                             \
-        /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
-        for (i = 0; i < 3; i++) {                                            \
-            bitmask = ~bitmasks[bitmask_index]; /* 1 = available */          \
-                                                                             \
-            /* Ignore bits below start index for first bitmask */            \
-            bitmask &= (~0u << index_in_bitmask);                            \
-                                                                             \
-            /* There is atleast one available slot this bitmask */           \
-            /* Go through bitmask until we find the slot, then use this. */  \
-            if (bitmask) {                                                   \
-                index_in_bitmask = 0;                                        \
-                while ((bitmask & 1u) == 0) {                                \
-                    bitmask >>= 1;                                           \
-                    index_in_bitmask++;                                      \
-                }                                                            \
-                pq_index = (bitmask_index << INDEX_TO_BITMASK_SHIFT)         \
-                                                        + index_in_bitmask;  \
-                goto found_slot##_n;                                         \
-            }                                                                \
-            /* New bitmask to check */                                       \
-            index_in_bitmask = 0;                                            \
-            bitmask_index++;                                                 \
-            if (bitmask_index >= PQ_BITMASKS_LENGTH) bitmask_index = 0;      \
-        }                                                                    \
-        /* No slot found within 64-96 slots of initial */                    \
-        halt();                                                              \
-                                                                             \
-        found_slot##_n:;                                                     \
+        pq_index = pq_find_next_available_slot(pq_d_index);                  \
                                                                              \
         /* Update delta_slots to reflect found slot */                       \
         delta_slots += PQ_CTM_RING_DIFF(pq_index, pq_d_index);               \
@@ -989,38 +995,7 @@ do {                                                                         \
                 if (pq_d_index >= PQ_CTM_LENGTH) pq_d_index -= PQ_CTM_LENGTH;\
                                                                              \
                 /* -------------- Find next available index ------- */       \
-                bitmask_index = pq_d_index >> INDEX_TO_BITMASK_SHIFT;        \
-                index_in_bitmask = pq_d_index & INDEX_IN_BITMASK_MASK;       \
-                                                                             \
-                /* Read through bitmasks until available slot or no slots in 3 bitmasks */ \
-                for (i = 0; i < 3; i++) {                                    \
-                    bitmask = ~bitmasks[bitmask_index]; /* 1 = available */  \
-                                                                             \
-                    /* Ignore bits below start index for first bitmask */    \
-                    bitmask &= (~0u << index_in_bitmask);                    \
-                                                                             \
-                    /* There is atleast one available space this bitmask */  \
-                    /* Go through bitmask until we find the slot */          \
-                    if (bitmask) {                                           \
-                        index_in_bitmask = 0;                                \
-                        while ((bitmask & 1u) == 0) {                        \
-                            bitmask >>= 1;                                   \
-                            index_in_bitmask++;                              \
-                        }                                                    \
-                        pq_index = (bitmask_index << INDEX_TO_BITMASK_SHIFT) \
-                                                        + index_in_bitmask;  \
-                        goto found_slot_lso##_n;                             \
-                    }                                                        \
-                    /* New bitmask to check */                               \
-                    index_in_bitmask = 0;                                    \
-                    bitmask_index++;                                         \
-                    if (bitmask_index >= PQ_BITMASKS_LENGTH)                 \
-                        bitmask_index = 0;                                   \
-                }                                                            \
-                /* No slot found within 64-96 slots of initial */            \
-                halt();                                                      \
-                                                                             \
-                found_slot_lso##_n:;                                         \
+                pq_index = pq_find_next_available_slot(pq_d_index);          \
                                                                              \
                 /* Update delta_slots to reflect found slot */               \
                 delta_slots += PQ_CTM_RING_DIFF(pq_index, pq_d_index);       \
@@ -1147,7 +1122,6 @@ _notify(__shared __gpr unsigned int *complete,
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
     uint32_t flow_id, ipg_ticks, pq_index, pq_d_index, delta_slots;
-    uint32_t bitmask_index, index_in_bitmask, bitmask, i;
     uint64_t dep_time, curtime;
 
     /* Reorder before potentially issuing a ring get */
