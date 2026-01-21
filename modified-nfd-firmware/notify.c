@@ -366,11 +366,11 @@ __shared __lmem struct nfd_in_pkt_desc lm_pacing_queue[PQ_LM_LENGTH];
 
 __shared __gpr uint32_t pq_ctm_head = 0;
 __shared __gpr uint64_t pq_head_time = 0;
-__shared __gpr uint32_t pq_ctm_sync_end = 0;
+__shared __gpr uint32_t pq_ctm_sync_end = 128;
 
 __shared __gpr uint32_t pq_lm_head = 0;
 __shared __gpr uint32_t pq_lm_dequeue_cnt = 0;
-__shared __gpr uint32_t pq_lm_sync_end = 0;
+__shared __gpr uint32_t pq_lm_sync_end = 128;
 
 __gpr uint32_t next_batch_out = 0;
 
@@ -468,6 +468,122 @@ sync_ctm_lm() {
     _BATCH_IN_TO_LM(5);
     _BATCH_IN_TO_LM(6);
     _BATCH_IN_TO_LM(7);
+}
+
+/* ---------------------------- k_pace: Dequeue functions ------------------------------ */
+#define _DEQUEUE_PROC(_pkt)                                                 \
+do {                                                                        \
+    /* Clear signal (it is implied raised if this macro is called )*/       \
+    /* (halt if not raised, as this indicates come corruption) */           \
+    if (!signal_test(&wq_sig##_pkt)) halt();                                \
+                                                                            \
+    raw0_buff = lm_pacing_queue[pq_lm_head].__raw[0];                       \
+                                                                            \
+    /* Point csr addr 3 (seqn_ptr) to correct queue */                      \
+    local_csr_write(local_csr_active_lm_addr_3,                             \
+        (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);                  \
+                                                                            \
+    /* Set seqn of packet, then increase counter */                         \
+    __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }                  \
+    __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }                   \
+                                                                            \
+    batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                             \
+    batch_out.pkt##_pkt##.__raw[1] = lm_pacing_queue[pq_lm_head].__raw[1];  \
+    batch_out.pkt##_pkt##.__raw[2] = lm_pacing_queue[pq_lm_head].__raw[2];  \
+    batch_out.pkt##_pkt##.__raw[3] = lm_pacing_queue[pq_lm_head].__raw[3];  \
+                                                                            \
+    _SET_DST_Q(_pkt);                                                       \
+    __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,             \
+                            out_msg_sz_2, out_msg_sz_2, sig_done,           \
+                            &wq_sig##_pkt);                                 \
+                                                                            \
+} while (0)
+
+/**
+ * Dequeue up to batch of packets and send to work queue
+ *
+ */
+__intrinsic void
+dequeue_pacing_queue() {
+    __gpr uint32_t raw0_buff;
+    uint64_t now;
+    uint32_t index_in_bitmask, bitmask_index, slots_to_send;
+    uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
+
+    /* We are not done until we reach current time (slots_to_send == 0), 
+       or have used (all) batch_out */
+    while (next_batch_out != 8) {
+        
+        /* Check if any slots are due for departure */
+        now = get_current_time();
+        if (now <= pq_head_time) return;
+        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_TICKS_TO_SLOT_SHIFT);
+        if (slots_to_send == 0) return;
+
+        /* TODO: we could check if there even is anything at head to send. if not, we can skip wait and move to next head 
+                 However this only improved speed at medium to low load, and would negatively affect high loads, aka where we
+                 need performance the most. (as at high loads check would always return true) */
+
+        /* Wait until the least recently used batch_out._pkt is available to write
+           (this will check if signal raised, but not clear it) */
+        switch (next_batch_out) {
+            case 0: wait_for_any(&wq_sig0); break;
+            case 1: wait_for_any(&wq_sig1); break;
+            case 2: wait_for_any(&wq_sig2); break;
+            case 3: wait_for_any(&wq_sig3); break;
+            case 4: wait_for_any(&wq_sig4); break;
+            case 5: wait_for_any(&wq_sig5); break;
+            case 6: wait_for_any(&wq_sig6); break;
+            case 7: wait_for_any(&wq_sig7); break;
+        }
+
+        /* Wait is done, so we can dequeue. Need to check if we should still dequeue 
+           (as head and "now" may have been moved while we waited) */
+        now = get_current_time();
+        if (now <= pq_head_time) return;
+        slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_TICKS_TO_SLOT_SHIFT);
+        if (slots_to_send == 0) return;
+
+        /* --- We are now checking slot pq_head points to */
+
+        /* Calculate which bitmask to check */
+        bitmask_index = pq_ctm_head >> INDEX_TO_BITMASK_SHIFT;
+        index_in_bitmask = pq_ctm_head & INDEX_IN_BITMASK_MASK;
+
+        /* If slot/head contains packet we dequeue it using LRU batch_out._pkt */
+        if((bitmasks[bitmask_index] >> index_in_bitmask) & 1u) {
+            switch (next_batch_out) {
+                case 0: _DEQUEUE_PROC(0); break;
+                case 1: _DEQUEUE_PROC(1); break;
+                case 2: _DEQUEUE_PROC(2); break;
+                case 3: _DEQUEUE_PROC(3); break;
+                case 4: _DEQUEUE_PROC(4); break;
+                case 5: _DEQUEUE_PROC(5); break;
+                case 6: _DEQUEUE_PROC(6); break;
+                case 7: _DEQUEUE_PROC(7); break;
+            }
+
+            next_batch_out++;
+
+            /* Zero bitmask for this slot (ctm and lm) */
+            bitmasks[bitmask_index] &= ~(1u << index_in_bitmask);
+
+            lm_bitmasks[pq_lm_head >> INDEX_TO_BITMASK_SHIFT] &= 
+                        ~(1u << (pq_lm_head & INDEX_IN_BITMASK_MASK) );
+        }
+
+        /* Let other threads know we have checked slot at head, 
+            so we move pq_head one forward */
+        pq_ctm_head++;
+        if (pq_ctm_head == PQ_CTM_LENGTH) pq_ctm_head = 0;
+        pq_lm_head++;
+        if (pq_lm_head == PQ_LM_LENGTH) pq_lm_head = 0;
+        pq_head_time += PQ_SLOT_TICKS; 
+
+        pq_lm_dequeue_cnt++;
+    }
+
+    next_batch_out = 0;
 }
 
 /* --------------------------------------------------- */
