@@ -348,6 +348,7 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
 #define PQ_SLOT_TICKS 32
 #define PQ_HORIZON_TICKS 32*4096
 
+#define PQ_CTM_MASK (PQ_CTM_LENGTH - 1u)
 #define PQ_TICKS_TO_SLOT_SHIFT 5u           /* How many bits to shift offset to get slot in queue */
 
 #define PQ_BITMASKS_LENGTH 128
@@ -356,8 +357,11 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
 #define INDEX_TO_BITMASK_SHIFT 5u           /* each bitmask 32 bits, so need to remove 5 first bits to get bitmask index  */
 #define INDEX_IN_BITMASK_MASK 0x0000001F    /* ... and only keep first 5 to get index inside bitmask */
 
-
 #define PQ_TRESH_FUTURE_SLOTS 3072
+
+
+#define PQ_CTM_RING_DIFF(_to, _from) (((_to) - (_from)) & PQ_CTM_MASK)
+
 
 /* CTM Pacing Queue */
 __export __ctm40 struct nfd_in_pkt_desc ctm_pacing_queue[PQ_CTM_LENGTH];
@@ -492,7 +496,6 @@ do {                                                                        \
     batch_out.pkt##_pkt##.__raw[2] = lm_pacing_queue[pq_lm_head].__raw[2];  \
     batch_out.pkt##_pkt##.__raw[3] = lm_pacing_queue[pq_lm_head].__raw[3];  \
                                                                             \
-    _SET_DST_Q(_pkt);                                                       \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,             \
                             out_msg_sz_2, out_msg_sz_2, sig_done,           \
                             &wq_sig##_pkt);                                 \
@@ -798,7 +801,6 @@ do {                                                                         \
     if (batch_in.pkt##_pkt##.eop) {                                          \
                                                                              \
         __critical_path();                                                   \
-        _NOTIFY_MU_CHK(_pkt);                                                \
         pkt_desc_tmp.is_nfd = batch_in.pkt##_pkt##.eop;                      \
         pkt_desc_tmp.offset = batch_in.pkt##_pkt##.offset;                   \
                                                                              \
@@ -854,13 +856,7 @@ do {                                                                         \
         found_slot##_n:;                                                     \
                                                                              \
         /* Update delta_slots to reflect found slot */                       \
-        {                                                                    \
-            unsigned int diff;                                               \
-            if (pq_index >= pq_d_index) diff = pq_index - pq_d_index;        \
-            else diff = (PQ_CTM_LENGTH + pq_index) - pq_d_index;             \
-                                                                             \
-            delta_slots += diff;                                             \
-        }                                                                    \
+        delta_slots += PQ_CTM_RING_DIFF(pq_index, pq_d_index);               \
                                                                              \
         /* --------- Place packet in queue -------------- */                 \
                                                                              \
@@ -1027,13 +1023,7 @@ do {                                                                         \
                 found_slot_lso##_n:;                                         \
                                                                              \
                 /* Update delta_slots to reflect found slot */               \
-                {                                                            \
-                    unsigned int diff;                                       \
-                    if (pq_index >= pq_d_index) diff = pq_index - pq_d_index;\
-                    else diff = (PQ_CTM_LENGTH + pq_index) - pq_d_index;     \
-                                                                             \
-                    delta_slots += diff;                                     \
-                }                                                            \
+                delta_slots += PQ_CTM_RING_DIFF(pq_index, pq_d_index);       \
                                                                              \
                 /* --------- Place packet in queue -------------- */         \
                                                                              \
