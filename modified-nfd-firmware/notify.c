@@ -813,17 +813,17 @@ do {} while (0)
 #endif
 
 
-#define _SEND_PACKET_TO_CTM(_pkt, _out)                                 \
+#define _SEND_PACKET_TO_CTM(_out)                                       \
 do {                                                                    \
     wait_for_all(&wq_sig##_out);                                        \
                                                                         \
     /* Prepare batch out */                                             \
     batch_out.pkt##_out##.__raw[0] = pkt_desc_tmp.__raw[0];             \
-    batch_out.pkt##_out##.__raw[1] = (lm_batch_in[_pkt].__raw[1]        \
+    batch_out.pkt##_out##.__raw[1] = (lm_batch_in.__raw[1]        \
                                             | notify_reset_state_gpr);  \
-    batch_out.pkt##_out##.__raw[2] = lm_batch_in[_pkt].__raw[2];        \
+    batch_out.pkt##_out##.__raw[2] = lm_batch_in.__raw[2];        \
     /* k_pace: Zero vlan / l3_offset */                                 \
-    batch_out.pkt##_out##.__raw[3] = lm_batch_in[_pkt].__raw[3]         \
+    batch_out.pkt##_out##.__raw[3] = lm_batch_in.__raw[3]         \
                                             &  0xFFFF0000;              \
                                                                         \
     /* Write packet to CTM */                                           \
@@ -837,7 +837,7 @@ do {                                                                    \
     }                                                                   \
 } while (0)
 
-#define _SEND_PACKET_LSO_TO_CTM(_pkt, _out)                             \
+#define _SEND_PACKET_LSO_TO_CTM(_out)                                   \
 do {                                                                    \
     wait_for_all(&wq_sig##_out);                                        \
                                                                         \
@@ -862,11 +862,11 @@ do {                                                                    \
 } while (0)
 
 
-#define _NOTIFY_PROC(_pkt)                                                   \
+#define _NOTIFY_PROC                                                         \
 do {                                                                         \
     /* --------------k_pace -------------------------- */                    \
     /* Read pacing rate + flow id from vlan field */                         \
-    vlan_field = lm_batch_in[_pkt].vlan;                                  \
+    vlan_field = lm_batch_in.vlan;                                           \
     ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */          \
     flow_id = (vlan_field >> 12) & 0x000F;                                   \
                                                                              \
@@ -877,11 +877,11 @@ do {                                                                         \
     /* ----------------------------------------------- */                    \
                                                                              \
     /* finished packet and no LSO */                                         \
-    if (lm_batch_in[_pkt].eop) {                                          \
+    if (lm_batch_in.eop) {                                                   \
                                                                              \
         __critical_path();                                                   \
-        pkt_desc_tmp.is_nfd = lm_batch_in[_pkt].eop;                      \
-        pkt_desc_tmp.offset = lm_batch_in[_pkt].offset;                   \
+        pkt_desc_tmp.is_nfd = lm_batch_in.eop;                               \
+        pkt_desc_tmp.offset = lm_batch_in.offset;                            \
                                                                              \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
@@ -923,11 +923,11 @@ do {                                                                         \
                                                                                 \
             /* Place packet in next available slot in pacing queue */           \
             lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];         \
-            lm_pacing_queue[pq_index].__raw[1] = (lm_batch_in[_pkt].__raw[1]    \
+            lm_pacing_queue[pq_index].__raw[1] = (lm_batch_in.__raw[1]          \
                                                     | notify_reset_state_gpr);  \
-            lm_pacing_queue[pq_index].__raw[2] = lm_batch_in[_pkt].__raw[2];    \
+            lm_pacing_queue[pq_index].__raw[2] = lm_batch_in.__raw[2];          \
             /* k_pace: Zero vlan / l3_offset */                                 \
-            lm_pacing_queue[pq_index].__raw[3] = lm_batch_in[_pkt].__raw[3]     \
+            lm_pacing_queue[pq_index].__raw[3] = lm_batch_in.__raw[3]           \
                                                     &  0xFFFF0000;              \
                                                                                 \
             /* mark lmem slot as occupied, to prevent sync from overwriting */  \
@@ -939,14 +939,14 @@ do {                                                                         \
             unsigned int addr_hi, addr_lo;                                   \
                                                                              \
             switch (next_batch_out) {                                        \
-                case 0: _SEND_PACKET_TO_CTM(_pkt, 0); break;                 \
-                case 1: _SEND_PACKET_TO_CTM(_pkt, 1); break;                 \
-                case 2: _SEND_PACKET_TO_CTM(_pkt, 2); break;                 \
-                case 3: _SEND_PACKET_TO_CTM(_pkt, 3); break;                 \
-                case 4: _SEND_PACKET_TO_CTM(_pkt, 4); break;                 \
-                case 5: _SEND_PACKET_TO_CTM(_pkt, 5); break;                 \
-                case 6: _SEND_PACKET_TO_CTM(_pkt, 6); break;                 \
-                case 7: _SEND_PACKET_TO_CTM(_pkt, 7); break;                 \
+                case 0: _SEND_PACKET_TO_CTM(0); break;                       \
+                case 1: _SEND_PACKET_TO_CTM(1); break;                       \
+                case 2: _SEND_PACKET_TO_CTM(2); break;                       \
+                case 3: _SEND_PACKET_TO_CTM(3); break;                       \
+                case 4: _SEND_PACKET_TO_CTM(4); break;                       \
+                case 5: _SEND_PACKET_TO_CTM(5); break;                       \
+                case 6: _SEND_PACKET_TO_CTM(6); break;                       \
+                case 7: _SEND_PACKET_TO_CTM(7); break;                       \
             }                                                                \
                                                                              \
             next_batch_out++;                                                \
@@ -954,7 +954,7 @@ do {                                                                         \
         }                                                                    \
                                                                              \
                                                                              \
-    } else if (lm_batch_in[_pkt].lso != NFD_IN_ISSUED_DESC_LSO_NULL) {       \
+    } else if (lm_batch_in.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {             \
         /* else LSO packets */                                               \
         __gpr struct nfd_in_lso_desc lso_pkt;                                \
         SIGNAL_PAIR lso_sig_pair;                                            \
@@ -1139,7 +1139,7 @@ _notify(__shared __gpr unsigned int *complete,
     __xread struct _issued_pkt_batch batch_in;
     struct nfd_in_pkt_desc pkt_desc_tmp;
 
-    __lmem struct nfd_in_issued_desc lm_batch_in[8];
+    __lmem struct nfd_in_issued_desc lm_batch_in;
 
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
@@ -1201,18 +1201,20 @@ _notify(__shared __gpr unsigned int *complete,
         pkt_desc_tmp.seq_num = 0;
 #endif
 
-        /* Copy issued desc into LM */
-        lm_batch_in[0] = batch_in.pkt0;
-        lm_batch_in[1] = batch_in.pkt1;
-        lm_batch_in[2] = batch_in.pkt2;
-        lm_batch_in[3] = batch_in.pkt3;
-        lm_batch_in[4] = batch_in.pkt4;
-        lm_batch_in[5] = batch_in.pkt5;
-        lm_batch_in[6] = batch_in.pkt6;
-        lm_batch_in[7] = batch_in.pkt7;
-
+        
         for (i = 0; i < 8; i++) {
-            _NOTIFY_PROC(i);
+            /* Copy issued desc into LM */
+            switch (i) {
+                case 0: lm_batch_in = batch_in.pkt0; break;
+                case 1: lm_batch_in = batch_in.pkt1; break;
+                case 2: lm_batch_in = batch_in.pkt2; break;
+                case 3: lm_batch_in = batch_in.pkt3; break;
+                case 4: lm_batch_in = batch_in.pkt4; break;
+                case 5: lm_batch_in = batch_in.pkt5; break;
+                case 6: lm_batch_in = batch_in.pkt6; break;
+                case 7: lm_batch_in = batch_in.pkt7; break;
+            }
+            _NOTIFY_PROC;
         }
 
         /* Allow the next context taking a message to go.
@@ -1262,8 +1264,8 @@ _notify(__shared __gpr unsigned int *complete,
         for (;;) {
             /* Count the message and service it */
             partial_served++;
-            lm_batch_in[0] = batch_in.pkt0;
-            _NOTIFY_PROC(0);
+            lm_batch_in = batch_in.pkt0;
+            _NOTIFY_PROC;
 
             /* Wait for new messages in ctm ring.
              * Note: other contexts should not fetch new messages or update
@@ -1307,8 +1309,8 @@ _notify(__shared __gpr unsigned int *complete,
         wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig, &msg_order_sig);
 
         /* Process the final descriptor from the batch */
-        lm_batch_in[0] = batch_in.pkt0;
-        _NOTIFY_PROC(0);
+        lm_batch_in = batch_in.pkt0;
+        _NOTIFY_PROC;
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
