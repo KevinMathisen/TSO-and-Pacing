@@ -1067,14 +1067,14 @@ do {                                                                         \
                     unsigned int addr_hi, addr_lo;                              \
                                                                                 \
                     switch (next_batch_out) {                                \
-                        case 0: _SEND_PACKET_LSO_TO_CTM(_pkt, 0); break;     \
-                        case 1: _SEND_PACKET_LSO_TO_CTM(_pkt, 1); break;     \
-                        case 2: _SEND_PACKET_LSO_TO_CTM(_pkt, 2); break;     \
-                        case 3: _SEND_PACKET_LSO_TO_CTM(_pkt, 3); break;     \
-                        case 4: _SEND_PACKET_LSO_TO_CTM(_pkt, 4); break;     \
-                        case 5: _SEND_PACKET_LSO_TO_CTM(_pkt, 5); break;     \
-                        case 6: _SEND_PACKET_LSO_TO_CTM(_pkt, 6); break;     \
-                        case 7: _SEND_PACKET_LSO_TO_CTM(_pkt, 7); break;     \
+                        case 0: _SEND_PACKET_LSO_TO_CTM(0); break;           \
+                        case 1: _SEND_PACKET_LSO_TO_CTM(1); break;           \
+                        case 2: _SEND_PACKET_LSO_TO_CTM(2); break;           \
+                        case 3: _SEND_PACKET_LSO_TO_CTM(3); break;           \
+                        case 4: _SEND_PACKET_LSO_TO_CTM(4); break;           \
+                        case 5: _SEND_PACKET_LSO_TO_CTM(5); break;           \
+                        case 6: _SEND_PACKET_LSO_TO_CTM(6); break;           \
+                        case 7: _SEND_PACKET_LSO_TO_CTM(7); break;           \
                     }                                                        \
                                                                              \
                     next_batch_out++;                                        \
