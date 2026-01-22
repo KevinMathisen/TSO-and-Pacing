@@ -106,8 +106,6 @@ static SIGNAL msg_order_sig;    /* Signal for reordering on message return */
 static SIGNAL_MASK wait_msk;
 static unsigned int next_ctx;
 
-__xwrite struct _pkt_desc_batch batch_out;
-
 #ifdef NFD_IN_LSO_CNTR_ENABLE
 static unsigned int nfd_in_lso_cntr_addr = 0;
 #endif
@@ -363,9 +361,9 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
 
 
 /* CTM Pacing Queue */
-__export __ctm40 struct nfd_in_pkt_desc ctm_pacing_queue[PQ_CTM_LENGTH];
+__export __ctm40 struct nfd_in_issued_desc ctm_pacing_queue[PQ_CTM_LENGTH];
 
-__shared __lmem struct nfd_in_pkt_desc lm_pacing_queue[PQ_LM_LENGTH];
+__shared __lmem struct nfd_in_issued_desc lm_pacing_queue[PQ_LM_LENGTH];
 
 __shared __gpr uint32_t pq_ctm_head = 0;
 __shared __gpr uint64_t pq_head_time = 0;
@@ -426,7 +424,7 @@ sync_ctm_lm() {
     __ctm40 void *ctm_ptr;
     unsigned int old_pq_lm_sync_end, addr_hi, addr_lo, lm_index;
 
-    __xread struct _pkt_desc_batch batch_in;
+    __xread struct nfd_in_issued_desc batch_in;
 
     /* Need more than 8 slots to sync! */
     if (pq_lm_dequeue_cnt < 8) return;
@@ -506,6 +504,8 @@ do {                                                                        \
  */
 __intrinsic void
 dequeue_pacing_queue() {
+    __xwrite struct _pkt_desc_batch batch_out;
+
     __gpr uint32_t raw0_buff;
     uint64_t now;
     uint32_t index_in_bitmask, bitmask_index, slots_to_send;
@@ -877,10 +877,8 @@ do {                                                                         \
             if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;          \
                                                                                 \
             /* Place packet in next available slot in pacing queue */           \
+            lm_pacing_queue[pq_index] = batch_in.pkt##_pkt##;                   \
             lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];         \
-            lm_pacing_queue[pq_index].__raw[1] = batch_in.pkt##_pkt##.__raw[1]; \
-            lm_pacing_queue[pq_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2]; \
-            lm_pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3]; \
                                                                                 \
             /* mark lmem slot as occupied, to prevent sync from overwriting */  \
             lm_bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=                  \
@@ -891,10 +889,8 @@ do {                                                                         \
             unsigned int addr_hi, addr_lo;                                      \
                                                                                 \
             /* Prepare batch out */                                             \
+            batch_out.pkt##_pkt## = batch_in.pkt##_pkt##;                       \
             batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];             \
-            batch_out.pkt##_pkt##.__raw[1] = batch_in.pkt##_pkt##.__raw[1];     \
-            batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
-            batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];     \
                                                                                 \
             /* Write packet to CTM */                                           \
             /* TODO: use least recently used batch out */                       \
@@ -1005,10 +1001,8 @@ do {                                                                         \
                     if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;  \
                                                                              \
                     /* Place packet in next available slot in pacing queue */   \
+                    lm_pacing_queue[pq_index] = lso_pkt.desc;                   \
                     lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0]; \
-                    lm_pacing_queue[pq_index].__raw[1] = lso_pkt.desc.__raw[1]; \
-                    lm_pacing_queue[pq_index].__raw[2] = lso_pkt.desc.__raw[2]; \
-                    lm_pacing_queue[pq_index].__raw[3] = lso_pkt.desc.__raw[3]; \
                                                                                 \
                     /* mark lmem slot as occupied, (prev sync from ovrwrt) */   \
                     lm_bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=          \
@@ -1019,10 +1013,8 @@ do {                                                                         \
                     unsigned int addr_hi, addr_lo;                              \
                                                                                 \
                     /* Prepare batch out */                                     \
+                    batch_out.pkt##_pkt## = lso_pkt.desc;                       \
                     batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];     \
-                    batch_out.pkt##_pkt##.__raw[1] = lso_pkt.desc.__raw[1];     \
-                    batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];     \
-                    batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3];     \
                                                                                 \
                     /* Write packet to CTM */                                   \
                     /* TODO: use least recently used batch out */               \
@@ -1104,6 +1096,8 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int num_avail;
 
     __xread struct _issued_pkt_batch batch_in;
+    __xwrite struct _issued_pkt_batch batch_out;
+
     struct nfd_in_pkt_desc pkt_desc_tmp;
 
     /* K_pace: variables we use to enqueue */
