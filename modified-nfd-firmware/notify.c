@@ -487,8 +487,12 @@ do {                                                                        \
     __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }                  \
     __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }                   \
                                                                             \
-    batch_out.pkt##_pkt## = lm_pacing_queue[pq_lm_head];                    \
     batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                             \
+    batch_out.pkt##_pkt##.__raw[1] = (lm_pacing_queue[pq_lm_head].__raw[1]  \
+                                                | notify_reset_state_gpr);  \
+    batch_out.pkt##_pkt##.__raw[2] = lm_pacing_queue[pq_lm_head].__raw[2];  \
+    batch_out.pkt##_pkt##.__raw[3] = (lm_pacing_queue[pq_lm_head].__raw[3]  \
+                                                            & 0xFFFF0000);  \
                                                                             \
     __mem_workq_add_work(dst_q, wq_raddr, &batch_out.pkt##_pkt,             \
                             out_msg_sz_2, out_msg_sz_2, sig_done,           \
@@ -874,12 +878,9 @@ do {                                                                         \
                                                                                 \
             /* Place packet in next available slot in pacing queue */           \
             lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];         \
-            lm_pacing_queue[pq_index].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] \
-                                                    | notify_reset_state_gpr);  \
+            lm_pacing_queue[pq_index].__raw[1] = batch_in.pkt##_pkt##.__raw[1]; \
             lm_pacing_queue[pq_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2]; \
-            /* k_pace: Zero vlan / l3_offset */                                 \
-            lm_pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3]  \
-                                                    &  0xFFFF0000;              \
+            lm_pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3]; \
                                                                                 \
             /* mark lmem slot as occupied, to prevent sync from overwriting */  \
             lm_bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=                  \
@@ -891,12 +892,9 @@ do {                                                                         \
                                                                                 \
             /* Prepare batch out */                                             \
             batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];             \
-            batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1]     \
-                                                    | notify_reset_state_gpr);  \
+            batch_out.pkt##_pkt##.__raw[1] = batch_in.pkt##_pkt##.__raw[1];     \
             batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
-            /* k_pace: Zero vlan / l3_offset */                                 \
-            batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3]      \
-                                                    &  0xFFFF0000;              \
+            batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3];     \
                                                                                 \
             /* Write packet to CTM */                                           \
             /* TODO: use least recently used batch out */                       \
@@ -1008,12 +1006,9 @@ do {                                                                         \
                                                                              \
                     /* Place packet in next available slot in pacing queue */   \
                     lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0]; \
-                    lm_pacing_queue[pq_index].__raw[1] = (lso_pkt.desc.__raw[1] \
-                                                |  notify_reset_state_gpr);     \
+                    lm_pacing_queue[pq_index].__raw[1] = lso_pkt.desc.__raw[1]; \
                     lm_pacing_queue[pq_index].__raw[2] = lso_pkt.desc.__raw[2]; \
-                    /* k_pace: Zero vlan / l3_offset */                         \
-                    lm_pacing_queue[pq_index].__raw[3] = lso_pkt.desc.__raw[3]  \
-                                                       & 0xFFFF0000;            \
+                    lm_pacing_queue[pq_index].__raw[3] = lso_pkt.desc.__raw[3]; \
                                                                                 \
                     /* mark lmem slot as occupied, (prev sync from ovrwrt) */   \
                     lm_bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=          \
@@ -1025,12 +1020,9 @@ do {                                                                         \
                                                                                 \
                     /* Prepare batch out */                                     \
                     batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];     \
-                    batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1]     \
-                                                |  notify_reset_state_gpr);     \
+                    batch_out.pkt##_pkt##.__raw[1] = lso_pkt.desc.__raw[1];     \
                     batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];     \
-                    /* k_pace: Zero vlan / l3_offset */                         \
-                    batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3]      \
-                                                       & 0xFFFF0000;            \
+                    batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3];     \
                                                                                 \
                     /* Write packet to CTM */                                   \
                     /* TODO: use least recently used batch out */               \
