@@ -283,8 +283,8 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
         wait_for_all(&wq_sig7); \
         batch_out.pkt7.__raw[3] = _a; \
         __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &wq_sig7); \
-        while (!signal_test(&wq_sig7));  \
         debug_index += 1; \
+        while (!signal_test(&wq_sig7));  \
     } \
  } while(0)
 
@@ -774,17 +774,15 @@ notify_setup(int side)
 
     /* ------ k_pace: init & setup ------- */
 
-    if (ctx() > 1 && ctx() < 6) {
         /* Raised wq signals to signal that batch_out is available */
-        raise_signal(&wq_sig0);
-        raise_signal(&wq_sig1);
-        raise_signal(&wq_sig2);
-        raise_signal(&wq_sig3);
-        raise_signal(&wq_sig4);
-        raise_signal(&wq_sig5);
-        raise_signal(&wq_sig6);
-        raise_signal(&wq_sig7);
-    }
+    raise_signal(&wq_sig0);
+    raise_signal(&wq_sig1);
+    raise_signal(&wq_sig2);
+    raise_signal(&wq_sig3);
+    raise_signal(&wq_sig4);
+    raise_signal(&wq_sig5);
+    raise_signal(&wq_sig6);
+    raise_signal(&wq_sig7);
 
     /* Initialize head timer, and align it to slots */
     pq_head_time = get_current_time() & ~((uint64_t)PQ_SLOT_TICKS - 1ull);
