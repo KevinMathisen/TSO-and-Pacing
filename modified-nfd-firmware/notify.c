@@ -813,11 +813,60 @@ do {} while (0)
 #endif
 
 
-#define _NOTIFY_PROC(_pkt, _n)                                               \
+#define _SEND_PACKET_TO_CTM(_pkt, _out)                                 \
+do {                                                                    \
+    wait_for_all(&wq_sig##_out);                                        \
+                                                                        \
+    /* Prepare batch out */                                             \
+    batch_out.pkt##_out##.__raw[0] = pkt_desc_tmp.__raw[0];             \
+    batch_out.pkt##_out##.__raw[1] = (lm_batch_in[_pkt].__raw[1]        \
+                                            | notify_reset_state_gpr);  \
+    batch_out.pkt##_out##.__raw[2] = lm_batch_in[_pkt].__raw[2];        \
+    /* k_pace: Zero vlan / l3_offset */                                 \
+    batch_out.pkt##_out##.__raw[3] = lm_batch_in[_pkt].__raw[3]         \
+                                            &  0xFFFF0000;              \
+                                                                        \
+    /* Write packet to CTM */                                           \
+    /* TODO: use least recently used batch out */                       \
+    ctm_ptr = &ctm_pacing_queue[pq_index];                              \
+    addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;          \
+    addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);               \
+    __asm {                                                             \
+        mem[write, batch_out.pkt##_out##, addr_hi, <<8, addr_lo,        \
+                        __ct_const_val(2)], sig_done[*wq_sig##_out]     \
+    }                                                                   \
+} while (0)
+
+#define _SEND_PACKET_LSO_TO_CTM(_pkt, _out)                             \
+do {                                                                    \
+    wait_for_all(&wq_sig##_out);                                        \
+                                                                        \
+    /* Prepare batch out */                                             \
+    batch_out.pkt##_out##.__raw[0] = pkt_desc_tmp.__raw[0];             \
+    batch_out.pkt##_out##.__raw[1] = (lso_pkt.desc.__raw[1]             \
+                                        |  notify_reset_state_gpr);     \
+    batch_out.pkt##_out##.__raw[2] = lso_pkt.desc.__raw[2];             \
+    /* k_pace: Zero vlan / l3_offset */                                 \
+    batch_out.pkt##_out##.__raw[3] = lso_pkt.desc.__raw[3]              \
+                                                & 0xFFFF0000;           \
+                                                                        \
+    /* Write packet to CTM */                                           \
+    /* TODO: use least recently used batch out */                       \
+    ctm_ptr = &ctm_pacing_queue[pq_index];                              \
+    addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;          \
+    addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);               \
+    __asm {                                                             \
+        mem[write, batch_out.pkt##_out##, addr_hi, <<8, addr_lo,        \
+                        __ct_const_val(2)], sig_done[*wq_sig##_out]     \
+    }                                                                   \
+} while (0)
+
+
+#define _NOTIFY_PROC(_pkt)                                                   \
 do {                                                                         \
     /* --------------k_pace -------------------------- */                    \
     /* Read pacing rate + flow id from vlan field */                         \
-    vlan_field = batch_in.pkt##_pkt##.vlan;                                  \
+    vlan_field = lm_batch_in[_pkt].vlan;                                  \
     ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */          \
     flow_id = (vlan_field >> 12) & 0x000F;                                   \
                                                                              \
@@ -828,11 +877,11 @@ do {                                                                         \
     /* ----------------------------------------------- */                    \
                                                                              \
     /* finished packet and no LSO */                                         \
-    if (batch_in.pkt##_pkt##.eop) {                                          \
+    if (lm_batch_in[_pkt].eop) {                                          \
                                                                              \
         __critical_path();                                                   \
-        pkt_desc_tmp.is_nfd = batch_in.pkt##_pkt##.eop;                      \
-        pkt_desc_tmp.offset = batch_in.pkt##_pkt##.offset;                   \
+        pkt_desc_tmp.is_nfd = lm_batch_in[_pkt].eop;                      \
+        pkt_desc_tmp.offset = lm_batch_in[_pkt].offset;                   \
                                                                              \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
@@ -874,43 +923,38 @@ do {                                                                         \
                                                                                 \
             /* Place packet in next available slot in pacing queue */           \
             lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];         \
-            lm_pacing_queue[pq_index].__raw[1] = (batch_in.pkt##_pkt##.__raw[1] \
+            lm_pacing_queue[pq_index].__raw[1] = (lm_batch_in[_pkt].__raw[1]    \
                                                     | notify_reset_state_gpr);  \
-            lm_pacing_queue[pq_index].__raw[2] = batch_in.pkt##_pkt##.__raw[2]; \
+            lm_pacing_queue[pq_index].__raw[2] = lm_batch_in[_pkt].__raw[2];    \
             /* k_pace: Zero vlan / l3_offset */                                 \
-            lm_pacing_queue[pq_index].__raw[3] = batch_in.pkt##_pkt##.__raw[3]  \
+            lm_pacing_queue[pq_index].__raw[3] = lm_batch_in[_pkt].__raw[3]     \
                                                     &  0xFFFF0000;              \
                                                                                 \
             /* mark lmem slot as occupied, to prevent sync from overwriting */  \
             lm_bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=                  \
                                 (1u <<  (pq_index & INDEX_IN_BITMASK_MASK));    \
         } else {                                                                \
-            /* -------- Send packet to CTM -------- */                          \
-            __ctm40 void *ctm_ptr;                                              \
-            unsigned int addr_hi, addr_lo;                                      \
-                                                                                \
-            /* Prepare batch out */                                             \
-            batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];             \
-            batch_out.pkt##_pkt##.__raw[1] = (batch_in.pkt##_pkt##.__raw[1]     \
-                                                    | notify_reset_state_gpr);  \
-            batch_out.pkt##_pkt##.__raw[2] = batch_in.pkt##_pkt##.__raw[2];     \
-            /* k_pace: Zero vlan / l3_offset */                                 \
-            batch_out.pkt##_pkt##.__raw[3] = batch_in.pkt##_pkt##.__raw[3]      \
-                                                    &  0xFFFF0000;              \
-                                                                                \
-            /* Write packet to CTM */                                           \
-            /* TODO: use least recently used batch out */                       \
-            ctm_ptr = &ctm_pacing_queue[pq_index];                              \
-            addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;          \
-            addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);               \
-            __asm {                                                             \
-                mem[write, batch_out.pkt##_pkt##, addr_hi, <<8, addr_lo,        \
-                                __ct_const_val(2)], sig_done[*wq_sig##_pkt]     \
-            }                                                                   \
-        }                                                                       \
+            /* -------- Send packet to CTM -------- */                       \
+            __ctm40 void *ctm_ptr;                                           \
+            unsigned int addr_hi, addr_lo;                                   \
+                                                                             \
+            switch (next_batch_out) {                                        \
+                case 0: _SEND_PACKET_TO_CTM(_pkt, 0); break;                 \
+                case 1: _SEND_PACKET_TO_CTM(_pkt, 1); break;                 \
+                case 2: _SEND_PACKET_TO_CTM(_pkt, 2); break;                 \
+                case 3: _SEND_PACKET_TO_CTM(_pkt, 3); break;                 \
+                case 4: _SEND_PACKET_TO_CTM(_pkt, 4); break;                 \
+                case 5: _SEND_PACKET_TO_CTM(_pkt, 5); break;                 \
+                case 6: _SEND_PACKET_TO_CTM(_pkt, 6); break;                 \
+                case 7: _SEND_PACKET_TO_CTM(_pkt, 7); break;                 \
+            }                                                                \
+                                                                             \
+            next_batch_out++;                                                \
+            next_batch_out &= 7;                                             \
+        }                                                                    \
                                                                              \
                                                                              \
-    } else if (batch_in.pkt##_pkt##.lso != NFD_IN_ISSUED_DESC_LSO_NULL) {    \
+    } else if (lm_batch_in[_pkt].lso != NFD_IN_ISSUED_DESC_LSO_NULL) {       \
         /* else LSO packets */                                               \
         __gpr struct nfd_in_lso_desc lso_pkt;                                \
         SIGNAL_PAIR lso_sig_pair;                                            \
@@ -929,7 +973,6 @@ do {                                                                         \
                          sizeof(lso_pkt), sig_done, &lso_sig_pair);          \
             wait_sig_mask(lso_wait_msk);                                     \
             __implicit_read(&lso_sig_pair.even);                             \
-            __implicit_read(&wq_sig##_pkt);                                  \
             while (signal_test(&lso_sig_pair.odd)) {                         \
                 /* Ring get failed, retry */                                 \
                 lso_ring_get(lso_ring_num, lso_ring_addr, lso_xnum,          \
@@ -1023,37 +1066,24 @@ do {                                                                         \
                     __ctm40 void *ctm_ptr;                                      \
                     unsigned int addr_hi, addr_lo;                              \
                                                                                 \
-                    /* Prepare batch out */                                     \
-                    batch_out.pkt##_pkt##.__raw[0] = pkt_desc_tmp.__raw[0];     \
-                    batch_out.pkt##_pkt##.__raw[1] = (lso_pkt.desc.__raw[1]     \
-                                                |  notify_reset_state_gpr);     \
-                    batch_out.pkt##_pkt##.__raw[2] = lso_pkt.desc.__raw[2];     \
-                    /* k_pace: Zero vlan / l3_offset */                         \
-                    batch_out.pkt##_pkt##.__raw[3] = lso_pkt.desc.__raw[3]      \
-                                                       & 0xFFFF0000;            \
-                                                                                \
-                    /* Write packet to CTM */                                   \
-                    /* TODO: use least recently used batch out */               \
-                    ctm_ptr = &ctm_pacing_queue[pq_index];                      \
-                    addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;  \
-                    addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);       \
-                    __asm {                                                     \
-                        mem[write, batch_out.pkt##_pkt##, addr_hi, <<8, addr_lo,\
-                                    __ct_const_val(2)], sig_done[*wq_sig##_pkt] \
-                    }                                                           \
-                                                                                \
-                    /* Ensure next lso get waits until CTM write complete */    \
-                    lso_wait_msk |= __signals(&wq_sig##_pkt);                   \
-                }                                                               \
+                    switch (next_batch_out) {                                \
+                        case 0: _SEND_PACKET_LSO_TO_CTM(_pkt, 0); break;     \
+                        case 1: _SEND_PACKET_LSO_TO_CTM(_pkt, 1); break;     \
+                        case 2: _SEND_PACKET_LSO_TO_CTM(_pkt, 2); break;     \
+                        case 3: _SEND_PACKET_LSO_TO_CTM(_pkt, 3); break;     \
+                        case 4: _SEND_PACKET_LSO_TO_CTM(_pkt, 4); break;     \
+                        case 5: _SEND_PACKET_LSO_TO_CTM(_pkt, 5); break;     \
+                        case 6: _SEND_PACKET_LSO_TO_CTM(_pkt, 6); break;     \
+                        case 7: _SEND_PACKET_LSO_TO_CTM(_pkt, 7); break;     \
+                    }                                                        \
+                                                                             \
+                    next_batch_out++;                                        \
+                    next_batch_out &= 7;                                     \
+                }                                                            \
                                                                              \
                 /* update departure time of next packet in tso chunk */      \
                 dep_time += ipg_ticks;                                       \
                                                                              \
-            } else {                                                         \
-                /* Remove the wq signal from the wait mask */                \
-                /* XXX flag the wq_sig as written for live range tracking */ \
-                wait_msk &= ~__signals(&wq_sig##_pkt);                       \
-                __implicit_write(&wq_sig##_pkt);                             \
             }                                                                \
                                                                              \
             /* if it is last LSO being read from ring */                     \
@@ -1066,11 +1096,6 @@ do {                                                                         \
                 break;                                                       \
             }                                                                \
         }                                                                    \
-    } else {                                                                 \
-        /* Remove the wq signal from the wait mask */                        \
-        /* XXX flag the wq_sig as written for live range tracking */         \
-        wait_msk &= ~__signals(&wq_sig##_pkt);                               \
-        __implicit_write(&wq_sig##_pkt);                                     \
     }                                                                        \
 } while (0)
 
@@ -1114,10 +1139,14 @@ _notify(__shared __gpr unsigned int *complete,
     __xread struct _issued_pkt_batch batch_in;
     struct nfd_in_pkt_desc pkt_desc_tmp;
 
+    __lmem struct nfd_in_issued_desc lm_batch_in[8];
+
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
     uint32_t flow_id, ipg_ticks, pq_index, pq_d_index, delta_slots;
     uint64_t dep_time, curtime;
+
+    unsigned int i;
 
     /* Reorder before potentially issuing a ring get */
     wait_for_all(&get_order_sig);
@@ -1145,17 +1174,7 @@ _notify(__shared __gpr unsigned int *complete,
             alu[*served, *served, +, NFD_IN_MAX_BATCH_SZ];
         }
 
-        wait_msk = __signals(&wq_sig0, &wq_sig1, &wq_sig2, &wq_sig3,
-                             &wq_sig4, &wq_sig5, &wq_sig6, &wq_sig7,
-                             &qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
-        __implicit_read(&wq_sig0);
-        __implicit_read(&wq_sig1);
-        __implicit_read(&wq_sig2);
-        __implicit_read(&wq_sig3);
-        __implicit_read(&wq_sig4);
-        __implicit_read(&wq_sig5);
-        __implicit_read(&wq_sig6);
-        __implicit_read(&wq_sig7);
+        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
@@ -1182,14 +1201,19 @@ _notify(__shared __gpr unsigned int *complete,
         pkt_desc_tmp.seq_num = 0;
 #endif
 
-        _NOTIFY_PROC(0, 0);
-        _NOTIFY_PROC(1, 1);
-        _NOTIFY_PROC(2, 2);
-        _NOTIFY_PROC(3, 3);
-        _NOTIFY_PROC(4, 4);
-        _NOTIFY_PROC(5, 5);
-        _NOTIFY_PROC(6, 6);
-        _NOTIFY_PROC(7, 7);
+        /* Copy issued desc into LM */
+        lm_batch_in[0] = batch_in.pkt0;
+        lm_batch_in[1] = batch_in.pkt1;
+        lm_batch_in[2] = batch_in.pkt2;
+        lm_batch_in[3] = batch_in.pkt3;
+        lm_batch_in[4] = batch_in.pkt4;
+        lm_batch_in[5] = batch_in.pkt5;
+        lm_batch_in[6] = batch_in.pkt6;
+        lm_batch_in[7] = batch_in.pkt7;
+
+        for (i = 0; i < 8; i++) {
+            _NOTIFY_PROC(i);
+        }
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
@@ -1214,14 +1238,6 @@ _notify(__shared __gpr unsigned int *complete,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
         wait_sig_mask(wait_msk);
-        __implicit_read(&wq_sig0);
-        __implicit_read(&wq_sig1);
-        __implicit_read(&wq_sig2);
-        __implicit_read(&wq_sig3);
-        __implicit_read(&wq_sig4);
-        __implicit_read(&wq_sig5);
-        __implicit_read(&wq_sig6);
-        __implicit_read(&wq_sig7);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_order_sig);
@@ -1233,7 +1249,7 @@ _notify(__shared __gpr unsigned int *complete,
         n_batch = batch_in.pkt0.num_batch;
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
-        wait_msk = __signals(&msg_sig0, &wq_sig0);
+        wait_msk = __signals(&msg_sig0);
 
         /* Interface and queue info is the same for all packets in batch */
         pkt_desc_tmp.intf = PCIE_ISL;
@@ -1246,7 +1262,8 @@ _notify(__shared __gpr unsigned int *complete,
         for (;;) {
             /* Count the message and service it */
             partial_served++;
-            _NOTIFY_PROC(0, 8);
+            lm_batch_in[0] = batch_in.pkt0;
+            _NOTIFY_PROC(0);
 
             /* Wait for new messages in ctm ring.
              * Note: other contexts should not fetch new messages or update
@@ -1271,9 +1288,7 @@ _notify(__shared __gpr unsigned int *complete,
             }
 
             wait_sig_mask(wait_msk);
-            __implicit_read(&wq_sig0);
             __implicit_read(&msg_sig0);
-            wait_msk |= __signals(&wq_sig0);
         }
 
         /* We have finished fetching the messages from the ring.
@@ -1284,17 +1299,16 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* Wait for the last get to complete */
         wait_sig_mask(wait_msk);
-        __implicit_read(&wq_sig0);
         __implicit_read(&msg_sig0);
 
         /* Set up wait_msk to process a full batch next */
         /* XXX Assume we will do a WQ put, _NOTIFY_PROC will clear
            wq_sig0 if necessary */
-        wait_msk = __signals(&wq_sig0, &msg_sig0, &msg_sig1, &qc_sig,
-                             &msg_order_sig);
+        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig, &msg_order_sig);
 
         /* Process the final descriptor from the batch */
-        _NOTIFY_PROC(0, 9);
+        lm_batch_in[0] = batch_in.pkt0;
+        _NOTIFY_PROC(0);
 
         /* Allow the next context taking a message to go.
          * We have finished _NOTIFY_PROC() where we need to
