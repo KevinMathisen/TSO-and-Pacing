@@ -424,7 +424,7 @@ sync_ctm_lm() {
     __ctm40 void *ctm_ptr;
     unsigned int old_pq_lm_sync_end, addr_hi, addr_lo, lm_index;
 
-    __xread struct nfd_in_issued_desc batch_in;
+    __xread struct _issued_pkt_batch batch_in;
 
     /* Need more than 8 slots to sync! */
     if (pq_lm_dequeue_cnt < 8) return;
@@ -1353,6 +1353,8 @@ notify_manager_reorder()
 __intrinsic void
 distr_notify(int side)
 {
+    __xwrite struct _pkt_desc_batch batch_out;
+    
     __implicit_read(&nfd_in_jumbo_compl_refl_in);
 
     /* Store reset state in absolute GPR */
