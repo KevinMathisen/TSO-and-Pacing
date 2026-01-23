@@ -864,8 +864,9 @@ do {                                                                    \
 do {                                                                         \
     /* --------------k_pace -------------------------- */                    \
     /* Read pacing rate + flow id from vlan field */                         \
+    /* Use 12 for ns->ticks, results in firmware inserting 4% smaller gaps*/ \
     vlan_field = lm_batch_in.vlan;                                           \
-    ipg_ticks = (vlan_field & 0x0FFF)*25; /* 500ns -> 20ns ticks */          \
+    ipg_ticks = (vlan_field & 0x0FFF)*12; /* 250ns -> 20ns ticks */          \
     flow_id = (vlan_field >> 12) & 0x000F;                                   \
                                                                              \
     /* Calculate departure time for packet */                                \
