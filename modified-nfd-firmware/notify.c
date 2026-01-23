@@ -474,7 +474,7 @@ sync_ctm_lm() {
 do {                                                                        \
     /* Clear signal (it is implied raised if this macro is called )*/       \
     /* (halt if not raised, as this indicates come corruption) */           \
-    if (!signal_test(&wq_sig##_pkt)) halt();                                \
+    if (!signal_test(&wq_sig##_pkt)) { DEBUG(0x0001) halt(); }              \
                                                                             \
     raw0_buff = lm_pacing_queue[pq_lm_head].__raw[0];                       \
                                                                             \
@@ -614,6 +614,7 @@ pq_find_next_available_slot(uint32_t pq_d_index)
     }
 
     /* No slot found within 64-96 slots of initial */
+    DEBUG(0x0002);
     halt();
     return 0;
 }
