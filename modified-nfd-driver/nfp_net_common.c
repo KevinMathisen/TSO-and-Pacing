@@ -757,7 +757,7 @@ static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
 	struct sock *sk;
 	unsigned long pacing_rate;
 	u32 packet_size;
-	u64 ipg_500ns, max_ipg_500ns;
+	u64 ipg_250ns, max_ipg_250ns;
 	
 	if (skb_is_gso(skb))
 		return;
@@ -767,21 +767,20 @@ static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
 
 	packet_size = skb->len - md_bytes;
 
-	ipg_500ns = 0;
+	ipg_250ns = 0;
 
 	if (pacing_rate && pacing_rate != ~0UL)
-			ipg_500ns = DIV_ROUND_UP( (u64)packet_size * 2000000ULL,
+			ipg_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
 													(u64)pacing_rate );
 
-	/* Can maybe set max ipg to lower to prevent edge cases, e.g. 900us */
-	max_ipg_500ns = 2000ULL;
-	if (ipg_500ns > max_ipg_500ns) 
-		ipg_500ns = max_ipg_500ns;
+	max_ipg_250ns = 4000ULL;
+	if (ipg_250ns > max_ipg_250ns) 
+		ipg_250ns = max_ipg_250ns;
 		
-	if (ipg_500ns > 0xFFF)
-	 	ipg_500ns = 0xFFF;
+	if (ipg_250ns > 0xFFF)
+	 	ipg_250ns = 0xFFF;
 	
-	txd->vlan = cpu_to_le16((u16)ipg_500ns);
+	txd->vlan = cpu_to_le16((u16)ipg_250ns);
 
 }
 
@@ -839,39 +838,39 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 		Interprets vlan field as IPG in 100ns ticks
 		(If later use time wheel, can set IPG in time wheel slots)
 
-	Convert sk_pacing_rate (B/s) -> IPG in 500ns (12 bits -> 500ns - 2.048ms)
+	Convert sk_pacing_rate (B/s) -> IPG in 250ns (12 bits -> 250ns - 1.024ms)
 	*/
 	{
 		struct sock *sk;
 		unsigned long pacing_rate;
 		u32 packet_size;
-		u64 ipg_500ns, max_ipg_500ns;
+		u64 ipg_250ns, max_ipg_250ns;
 
 		sk = skb->sk;
 		pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;		
 
 		packet_size = (u32)mss + (hdrlen - md_bytes);
 		
-		ipg_500ns = 0;			// If pacing rate is 0 -> IPG is 0
+		ipg_250ns = 0;			// If pacing rate is 0 -> IPG is 0
 
 		/* If pacing rate is not 0, 
-			calculate IPG (in 500ns ticks) for packets in burst 
-			( IPG = packet_size / bytes_per_second * 2*10^6 ) */
+			calculate IPG (in 250ns ticks) for packets in burst 
+			( IPG = packet_size / bytes_per_second * 4*10^6 ) */
 		if (pacing_rate && pacing_rate != ~0UL)
-			ipg_500ns = DIV_ROUND_UP( (u64)packet_size * 2000000ULL,
+			ipg_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
 													(u64)pacing_rate );
 		
 		/* Need a max ipg to not wrap queue in firmware
 			(total IPG for burst should not exceed 1ms) */
 		if (txbuf->pkt_cnt) {
-			max_ipg_500ns = DIV_ROUND_UP(2000ULL, txbuf->pkt_cnt);
-			if (ipg_500ns > max_ipg_500ns) 
-				ipg_500ns = max_ipg_500ns;
+			max_ipg_250ns = DIV_ROUND_UP(4000ULL, txbuf->pkt_cnt);
+			if (ipg_250ns > max_ipg_250ns) 
+				ipg_250ns = max_ipg_250ns;
 		}
 		
 		// clamp to 12 bits
-		if (ipg_500ns > 0xFFF)
-			ipg_500ns = 0xFFF;
+		if (ipg_250ns > 0xFFF)
+			ipg_250ns = 0xFFF;
 		
 		/* 16 bit Vlan field: 
 		15      12 11               0
@@ -880,7 +879,7 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 		+---------+-----------------+
 			4 bits     12 bits
 		*/
-		txd->vlan = cpu_to_le16((u16)ipg_500ns);
+		txd->vlan = cpu_to_le16((u16)ipg_250ns);
 
 		/* Print stats from 100th to 140th call */
 		if (this_cpu_read(printk_call_counter) < 140) {
