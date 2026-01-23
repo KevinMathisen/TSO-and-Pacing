@@ -589,7 +589,7 @@ pq_find_next_available_slot(uint32_t pq_d_index)
     uint32_t bitmask_index = pq_d_index >> INDEX_TO_BITMASK_SHIFT;
     uint32_t index_in_bitmask = pq_d_index & INDEX_IN_BITMASK_MASK;
 
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 5; i++) {
         bitmask = ~bitmasks[bitmask_index];              /* 1 = available */
 
         /* Ignore bits below start index for first bitmask */
@@ -613,7 +613,7 @@ pq_find_next_available_slot(uint32_t pq_d_index)
             bitmask_index = 0;
     }
 
-    /* No slot found within 64-96 slots of initial */
+    /* No slot found within 128-160 slots of initial */
     DEBUG(0x0002);
     halt();
     return 0;
