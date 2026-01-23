@@ -474,7 +474,7 @@ sync_ctm_lm() {
 do {                                                                        \
     /* Clear signal (it is implied raised if this macro is called )*/       \
     /* (halt if not raised, as this indicates come corruption) */           \
-    if (!signal_test(&wq_sig##_pkt)) { DEBUG(0x0001) halt(); }              \
+    if (!signal_test(&wq_sig##_pkt)) { DEBUG(0x0001); halt(); }              \
                                                                             \
     raw0_buff = lm_pacing_queue[pq_lm_head].__raw[0];                       \
                                                                             \
