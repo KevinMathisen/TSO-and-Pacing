@@ -284,7 +284,6 @@ __shared __gpr uint32_t debug_index = 0; // Offset from wire_debug to append deb
         batch_out.pkt7.__raw[3] = _a; \
         __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index), 4, 4, sig_done, &wq_sig7); \
         debug_index += 1; \
-        while (!signal_test(&wq_sig7));  \
     } \
  } while(0)
 
@@ -1100,16 +1099,14 @@ do {                                                                         \
 __intrinsic void
 sync_dequeue_loop() {
     wait_for_all(&get_order_sig);
-    /* Participate in ctm_ring_get ordering */
     reorder_done_opt(&next_ctx, &get_order_sig);
 
     sync_ctm_lm();
+    dequeue_pacing_queue();
 
     /* Participate in msg ordering */
     wait_for_all(&msg_order_sig);
     reorder_done_opt(&next_ctx, &msg_order_sig);
-
-    dequeue_pacing_queue();
 }
 
 /**
@@ -1148,6 +1145,7 @@ _notify(__shared __gpr unsigned int *complete,
 
     /* Reorder before potentially issuing a ring get */
     wait_for_all(&get_order_sig);
+    reorder_done_opt(&next_ctx, &get_order_sig);
 
     /* There is a FULL batch to process
      * XXX assume that issue_dma inc's dma seq for each nfd_in_issued_desc in
@@ -1157,9 +1155,6 @@ _notify(__shared __gpr unsigned int *complete,
     {
         /* Process whole batch */
         __critical_path();
-
-        /* Participate in ctm_ring_get ordering */
-        reorder_done_opt(&next_ctx, &get_order_sig);
 
         ctm_ring_get(NOTIFY_RING_ISL, input_ring, &batch_in.pkt0,
                      (sizeof(struct nfd_in_issued_desc) * 4), &msg_sig0);
@@ -1172,11 +1167,10 @@ _notify(__shared __gpr unsigned int *complete,
             alu[*served, *served, +, NFD_IN_MAX_BATCH_SZ];
         }
 
-        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1, &msg_order_sig);
+        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
-        __implicit_read(&msg_order_sig);
 
         /* Batches have a least one packet, but n_batch may still be
          * zero, meaning that the queue is down.  In this case, EOP for
@@ -1199,7 +1193,6 @@ _notify(__shared __gpr unsigned int *complete,
         pkt_desc_tmp.seq_num = 0;
 #endif
 
-        
         for (i = 0; i < 8; i++) {
             /* Copy issued desc into LM */
             switch (i) {
@@ -1214,11 +1207,6 @@ _notify(__shared __gpr unsigned int *complete,
             }
             _NOTIFY_PROC;
         }
-
-        /* Allow the next context taking a message to go.
-         * We have finished _NOTIFY_PROC() where we need to
-         * lock out other threads. */
-        reorder_done_opt(&next_ctx, &msg_order_sig);
 
         /* Map batch.queue to a QC queue and increment the TX_R pointer
          * for that queue by n_batch */
@@ -1240,7 +1228,6 @@ _notify(__shared __gpr unsigned int *complete,
         wait_sig_mask(wait_msk);
         __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
-        __implicit_read(&msg_order_sig);
 
 
         /* This is the first message in the batch. Do not wait for
@@ -1295,7 +1282,6 @@ _notify(__shared __gpr unsigned int *complete,
          * Update served and allow other contexts to get messages
          * from ctm ring */
         *served += NFD_IN_MAX_BATCH_SZ;
-        reorder_done_opt(&next_ctx, &get_order_sig);
 
         /* Wait for the last get to complete */
         wait_sig_mask(wait_msk);
@@ -1304,29 +1290,21 @@ _notify(__shared __gpr unsigned int *complete,
         /* Set up wait_msk to process a full batch next */
         /* XXX Assume we will do a WQ put, _NOTIFY_PROC will clear
            wq_sig0 if necessary */
-        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig, &msg_order_sig);
+        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig);
 
         /* Process the final descriptor from the batch */
         lm_batch_in = batch_in.pkt0;
         _NOTIFY_PROC;
 
-        /* Allow the next context taking a message to go.
-         * We have finished _NOTIFY_PROC() where we need to
-         * lock out other threads. */
-        reorder_done_opt(&next_ctx, &msg_order_sig);
-
         /* Increment the TX_R pointer for this queue by n_batch */
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
-    } else {
-        /* Participate in ctm_ring_get ordering */
-        reorder_done_opt(&next_ctx, &get_order_sig);
-
-        /* Participate in msg ordering */
-        wait_for_all(&msg_order_sig);
-        reorder_done_opt(&next_ctx, &msg_order_sig);
     }
+
+    /* Participate in msg ordering */
+    wait_for_all(&msg_order_sig);
+    reorder_done_opt(&next_ctx, &msg_order_sig);
 }
 
 
