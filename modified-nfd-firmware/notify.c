@@ -749,7 +749,7 @@ void
 notify_setup(int side)
 {
     dst_q = wq_num_base;
-    wait_msk = __signals(&msg_sig0, &msg_sig1, &msg_order_sig);
+    wait_msk = __signals(&msg_sig0, &msg_sig1);
 
     next_ctx = reorder_get_next_ctx_off(ctx(), NFD_IN_NOTIFY_STRIDE);
 
