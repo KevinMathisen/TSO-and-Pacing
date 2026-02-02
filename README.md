@@ -37,12 +37,12 @@ And a personal machine for generating plots based on the packet captures from te
 ## Modifying the NFP driver and CoreNIC firmware
 The NFP drivers can be modified by changing the files in the NFP driver directory you installed, then compiling it. The [`nfp_net_common.c`](modified-nfd-driver/nfp_net_common.c) file contains our modifications to the driver, and can be copied to the oot NDF driver as follows:
 ```bash
-cp ./modified-nfd-driver/nfp_net_common.c <path>/modified-nfp-oot-driver-2019/src/
+cp ./modified-nfd-driver/nfp_net_common.c $HOME/master/modified-nfp-oot-driver-2019/src/
 ```
 
 The CoreNIC firmware can similarly be modified by changing the files in the CoreNIC directory you installed, then compiling it. The [`notify.c`](modified-nfd-firmware/notify.c) file contains our modifications to the firmware, and can be copied into the CoreNIC firmware as follows:
 ```bash
-cp ./modified-nfd-firmware/notify.c <path>/modified-nfp-firmware/deps/ng-nfd.git/me/blocks/vnic/pci_in/
+cp ./modified-nfd-firmware/notify.c $HOME/master/modified-nfp-firmware/deps/ng-nfd.git/me/blocks/vnic/pci_in/
 ```
 
 ## Compiling and loading modified driver and firmware
