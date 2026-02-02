@@ -70,6 +70,14 @@ The build script can be ran with the following options
   - By default this skips building, to prevent rebuilding the same drivers/fimware here. When running for the first time, you need to explicitly build here (by modifying the script or running the commands yourself).
 
 ### Configuring the Netronome interface
+Set the IP address (as the IP address might disapear after loading updated drivers. Alternatively, you can add a netplan file to set `enp2s0np0` to a static ip).
+```bash
+sudo ip addr add 192.168.50.1/24 dev enp2s0np0
+
+# Confirm with:
+ip -br addr show dev enp2s0np0
+```
+
 Enable/disale TSO:
 ```bash
 sudo ethtool -K enp2s0np0 tso on gso on
