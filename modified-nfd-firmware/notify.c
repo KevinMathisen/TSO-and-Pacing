@@ -340,6 +340,8 @@ sync_ctm_lm() {
     ctm_ptr = &ctm_pacing_queue[pq_ctm_sync_end];
     addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;
     addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);
+
+    // Read *8* x 64 bit (4 desc. -> 64B)
     __asm {
         mem[read, batch_in.pkt0, addr_hi, <<8, addr_lo, __ct_const_val(8)], \
                         sig_done[*msg_sig0];
@@ -779,7 +781,7 @@ do {                                                                         \
         flows_prev_dep_time[flow_id] = dep_time;                             \
                                                                              \
         /* Place packet directly in lmem if close departure time */          \
-        if (delta_slots < (PQ_LM_LENGTH-pq_lm_dequeue_cnt)) {                \
+        if (delta_slots < (PQ_LM_LENGTH)) {                                  \
             /* convert index to lmem */                                      \
             pq_index = (pq_lm_head + delta_slots);                           \
             if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;          \
@@ -898,7 +900,7 @@ do {                                                                         \
                                 (1u << (pq_index & INDEX_IN_BITMASK_MASK));  \
                                                                              \
                 /* Place packet directly in lmem if close departure time */  \
-                if (delta_slots < (PQ_LM_LENGTH-pq_lm_dequeue_cnt)) {        \
+                if (delta_slots < (PQ_LM_LENGTH)) {                          \
                     /* convert index to lmem */                              \
                     pq_index = (pq_lm_head + delta_slots);                   \
                     if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;  \
