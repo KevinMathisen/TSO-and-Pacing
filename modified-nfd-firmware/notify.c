@@ -223,12 +223,10 @@ __shared __gpr uint32_t debug_index = 0;
 */
 #define DEBUG(_a) do {                                                         \
     if (debug_index < 200) {                                                   \
-        debug_index += 1;                                                      \
         wait_for_all(&wq_sig7);                                                \
         batch_out.pkt7.__raw[3] = _a;                                          \
-        __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index),    \
+        __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + 1,                \
                                                     4, 4, sig_done, &wq_sig7); \
-        debug_index += 1;                                                      \
     }                                                                          \
  } while(0)
 
@@ -248,25 +246,26 @@ __shared __gpr uint32_t debug_index = 0;
  */
 #define DEBUG2() do {                                                           \
     if (debug_index < 200) {                                                    \
-        wait_for_all(&wq_sig7);                                                 \
         uint32_t __total = 0;                                                   \
+        uint32_t __total2 = 0;                                                  \
         uint32_t __i;                                                           \
+        wait_for_all(&wq_sig7);                                                 \
         for (__i = 0; __i < PQ_BITMASKS_LENGTH; __i++) {                        \
             uint32_t __pc;                                                      \
             _POPCOUNT32(bitmasks[__i], __pc);                                   \
             __total += __pc;                                                    \
         }                                                                       \
-        batch_out.pkt7.__raw[0] = __total;                                      \
-        __total = 0;                                                            \
         for (__i = 0; __i < LM_BITMASKS_LENGTH; __i++) {                        \
             uint32_t __pc;                                                      \
             _POPCOUNT32(lm_bitmasks[__i], __pc);                                \
-            __total += __pc;                                                    \
+            __total2 += __pc;                                                   \
         }                                                                       \
-        batch_out.pkt7.__raw[0] |= __total << 16;                               \
-        batch_out.pkt7.__raw[0] += 1;                                           \
+        if (pq_ctm_head == 0) __total++;                                        \
+        __total |= __total2 << 16;                                              \
                                                                                 \
-        __mem_write32(&batch_out.pkt7.__raw[0], wire_debug + (debug_index),     \
+        batch_out.pkt7.__raw[0] = __total;                                      \
+                                                                                \
+        __mem_write32(&batch_out.pkt7.__raw[0], wire_debug,                     \
                                                     4, 4, sig_done, &wq_sig7);  \
     }                                                                           \
 } while (0)
