@@ -223,6 +223,7 @@ __shared __gpr uint32_t debug_index = 0;
 */
 #define DEBUG(_a) do {                                                         \
     if (debug_index < 200) {                                                   \
+        debug_index += 1;                                                      \
         wait_for_all(&wq_sig7);                                                \
         batch_out.pkt7.__raw[3] = _a;                                          \
         __mem_write32(&batch_out.pkt7.__raw[3], wire_debug + (debug_index),    \
@@ -263,10 +264,10 @@ __shared __gpr uint32_t debug_index = 0;
             __total += __pc;                                                    \
         }                                                                       \
         batch_out.pkt7.__raw[0] |= __total << 16;                               \
+        batch_out.pkt7.__raw[0] += 1;                                           \
                                                                                 \
         __mem_write32(&batch_out.pkt7.__raw[0], wire_debug + (debug_index),     \
                                                     4, 4, sig_done, &wq_sig7);  \
-        debug_index += 1;                                                       \
     }                                                                           \
 } while (0)
 
