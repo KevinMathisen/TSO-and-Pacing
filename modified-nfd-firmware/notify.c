@@ -237,14 +237,13 @@ __shared __gpr uint32_t debug_index = 0;
 
 /* ------------ Constants/shared variables (PACING_QUEUE == PQ) ------------ */
 
-#define PQ_CTM_LENGTH 8192
+#define PQ_CTM_LENGTH 6144
 #define PQ_LM_LENGTH 160
 #define PQ_LM_SYNC_LENGTH 96
 
 #define PQ_SLOT_TICKS 32
 #define PQ_HORIZON_TICKS (32 * PQ_CTM_LENGTH)
 
-#define PQ_CTM_MASK (PQ_CTM_LENGTH - 1u)
 
 /* How many bits to shift offset to get slot in queue */
 #define PQ_TICKS_TO_SLOT_SHIFT 5u           
@@ -257,13 +256,15 @@ __shared __gpr uint32_t debug_index = 0;
 /* ... and only keep first 5 to get index inside bitmask */
 #define INDEX_IN_BITMASK_MASK 0x0000001F    
 
-#define PQ_TRESH_FUTURE_SLOTS 6144
+#define PQ_TRESH_FUTURE_SLOTS 5120
 
 
-#define PQ_CTM_RING_DIFF(_to, _from) (((_to) - (_from)) & PQ_CTM_MASK)
+#define PQ_CTM_RING_DIFF(_to, _from)                             \
+    (((_to) >= (_from)) ? ((_to) - (_from))                      \
+                        : (PQ_CTM_LENGTH - ((_from) - (_to))))
 
 #define PQ_DEP_TIME_DIFF_TRESHOLD(_delta_slots)                          \
-    ((_delta_slots -  PQ_TRESH_FUTURE_SLOTS) << PQ_TICKS_TO_SLOT_SHIFT)  \
+    ((_delta_slots -  PQ_TRESH_FUTURE_SLOTS) << PQ_TICKS_TO_SLOT_SHIFT)
 
 /* Data structures and pointers */
 
@@ -474,9 +475,9 @@ dequeue_pacing_queue() {
         /* Let other threads know we have checked slot at head, 
             so we move pq_head one forward */
         pq_ctm_head++;
-        if (pq_ctm_head == PQ_CTM_LENGTH) pq_ctm_head = 0;
+        if (pq_ctm_head >= PQ_CTM_LENGTH) pq_ctm_head = 0;
         pq_lm_head++;
-        if (pq_lm_head == PQ_LM_LENGTH) pq_lm_head = 0;
+        if (pq_lm_head >= PQ_LM_LENGTH) pq_lm_head = 0;
         pq_head_time += PQ_SLOT_TICKS; 
 
         pq_lm_dequeue_cnt++;
