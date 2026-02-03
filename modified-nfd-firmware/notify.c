@@ -262,6 +262,8 @@ __shared __gpr uint32_t debug_index = 0;
 
 #define PQ_CTM_RING_DIFF(_to, _from) (((_to) - (_from)) & PQ_CTM_MASK)
 
+#define PQ_DEP_TIME_DIFF_TRESHOLD(_delta_slots)                          \
+    ((_delta_slots -  PQ_TRESH_FUTURE_SLOTS) << PQ_TICKS_TO_SLOT_SHIFT)  \
 
 /* Data structures and pointers */
 
@@ -760,8 +762,16 @@ do {                                                                         \
                                                     PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
         /* Ensure packet is not enqueued to far in future */                 \
-        if (delta_slots >= PQ_TRESH_FUTURE_SLOTS)                            \
+        /*    and update last departure time of flow */                      \
+        if (delta_slots > PQ_TRESH_FUTURE_SLOTS) {                           \
+            flows_prev_dep_time[flow_id] =                                   \
+                        dep_time - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);   \
             delta_slots = PQ_TRESH_FUTURE_SLOTS;                             \
+                                                                             \
+        } else {                                                             \
+            __critical_path();                                               \
+            flows_prev_dep_time[flow_id] = dep_time;                         \
+        }                                                                    \
                                                                              \
         /* Find desired (CTM) slot to enqueue in relation to head */         \
         pq_d_index = pq_ctm_head + delta_slots;                              \
@@ -775,10 +785,8 @@ do {                                                                         \
         /* --------- Place packet in queue -------------- */                 \
                                                                              \
         /* Reflect that packet is enqueued by updating bitmask */            \
-        /*  and last departure time of flow */                               \
         bitmasks[pq_index >> INDEX_TO_BITMASK_SHIFT] |=                      \
                                 (1u << (pq_index & INDEX_IN_BITMASK_MASK));  \
-        flows_prev_dep_time[flow_id] = dep_time;                             \
                                                                              \
         /* Place packet directly in lmem if close departure time */          \
         if (delta_slots < (PQ_LM_LENGTH)) {                                  \
@@ -880,8 +888,15 @@ do {                                                                         \
                                                     PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
                 /* Ensure packet is not enqueued to far in future */         \
-                if (delta_slots >= PQ_TRESH_FUTURE_SLOTS)                    \
+                /*  and update departure time of next packet in tso chunk */ \
+                if (delta_slots > PQ_TRESH_FUTURE_SLOTS) {                   \
+                    dep_time +=                                              \
+                        ipg_ticks - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);  \
                     delta_slots = PQ_TRESH_FUTURE_SLOTS;                     \
+                } else {                                                     \
+                    __critical_path();                                       \
+                    dep_time += ipg_ticks;                                   \
+                }                                                            \
                                                                              \
                 /* Find desired (CTM) slot to enqueue in relation to head */ \
                 pq_d_index = pq_ctm_head + delta_slots;                      \
@@ -935,13 +950,12 @@ do {                                                                         \
                     next_batch_out &= 7;                                     \
                 }                                                            \
                                                                              \
-                /* update departure time of next packet in tso chunk */      \
-                dep_time += ipg_ticks;                                       \
             }                                                                \
                                                                              \
             /* if it is last LSO being read from ring */                     \
             if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) {            \
                 /* k_pace: update last departure time (substract last add)*/ \
+                /* todo: last add may not be ipg */                          \
                 flows_prev_dep_time[flow_id] = dep_time-ipg_ticks;           \
                                                                              \
                 /* Break out of loop processing LSO ring */                  \
