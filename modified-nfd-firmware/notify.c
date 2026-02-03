@@ -215,7 +215,6 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 
 /* -------------------- k_pace: Debug -------------------------------------- */
 __export __emem uint32_t wire_debug[1024*1024];
-__export __emem uint32_t wire_debug_idx;
 __shared __gpr uint32_t debug_index = 0;
 
 /*
@@ -263,7 +262,7 @@ __shared __gpr uint32_t debug_index = 0;
             _POPCOUNT32(lm_bitmasks[__i], __pc);                                \
             __total += __pc;                                                    \
         }                                                                       \
-        batch_out.pkt7.__raw[0] |= __total >> 16;                               \
+        batch_out.pkt7.__raw[0] |= __total << 16;                               \
                                                                                 \
         __mem_write32(&batch_out.pkt7.__raw[0], wire_debug + (debug_index),     \
                                                     4, 4, sig_done, &wq_sig7);  \
