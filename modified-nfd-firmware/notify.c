@@ -450,15 +450,14 @@ dequeue_pacing_queue() {
     uint32_t index_in_bitmask, bitmask_index, slots_to_send;
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
 
-    /* We are not done until we reach current time (slots_to_send == 0), 
-       or have used (all) batch_out */
-    while (next_batch_out != 8) {
+    /* We are not done until we reach current time (slots_to_send == 0) */
+    for (;;) {
         
         /* Check if any slots are due for departure */
         now = get_current_time();
-        if (now <= pq_head_time) return;
+        if (now <= pq_head_time) break;
         slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_TICKS_TO_SLOT_SHIFT);
-        if (slots_to_send == 0) return;
+        if (slots_to_send == 0) break;
 
         /* Wait until the least recently used batch_out._pkt is available to write
            (this will check if signal raised, but not clear it) */
@@ -476,9 +475,9 @@ dequeue_pacing_queue() {
         /* Wait is done, so we can dequeue. Need to check if we should still dequeue 
            (as head and "now" may have been moved while we waited) */
         now = get_current_time();
-        if (now <= pq_head_time) return;
+        if (now <= pq_head_time) break;
         slots_to_send = (uint32_t)((now-pq_head_time) >> PQ_TICKS_TO_SLOT_SHIFT);
-        if (slots_to_send == 0) return;
+        if (slots_to_send == 0) break;
 
         /* --- We are now checking slot pq_head points to */
 
@@ -500,6 +499,7 @@ dequeue_pacing_queue() {
             }
 
             next_batch_out++;
+            if (next_batch_out == 7) next_batch_out = 0;
 
             /* Zero bitmask for this slot (ctm and lm) */
             bitmasks[bitmask_index] &= ~(1u << index_in_bitmask);
@@ -518,8 +518,6 @@ dequeue_pacing_queue() {
 
         pq_lm_dequeue_cnt++;
     }
-
-    next_batch_out = 0;
 }
 
 /**
