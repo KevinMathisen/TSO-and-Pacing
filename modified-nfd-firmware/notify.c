@@ -237,19 +237,19 @@ __shared __gpr uint32_t debug_index = 0;
 
 /* ------------ Constants/shared variables (PACING_QUEUE == PQ) ------------ */
 
-#define PQ_CTM_LENGTH 4096
-#define PQ_LM_LENGTH 192
-#define PQ_LM_SYNC_LENGTH 128
+#define PQ_CTM_LENGTH 8192
+#define PQ_LM_LENGTH 160
+#define PQ_LM_SYNC_LENGTH 96
 
 #define PQ_SLOT_TICKS 32
-#define PQ_HORIZON_TICKS 32*4096
+#define PQ_HORIZON_TICKS (32 * PQ_CTM_LENGTH)
 
 #define PQ_CTM_MASK (PQ_CTM_LENGTH - 1u)
 
 /* How many bits to shift offset to get slot in queue */
 #define PQ_TICKS_TO_SLOT_SHIFT 5u           
 
-#define PQ_BITMASKS_LENGTH 128
+#define PQ_BITMASKS_LENGTH 256
 #define LM_BITMASKS_LENGTH 6
 
 /* each bitmask 32 bits, so need to remove 5 first bits to get bitmask index */
@@ -257,7 +257,7 @@ __shared __gpr uint32_t debug_index = 0;
 /* ... and only keep first 5 to get index inside bitmask */
 #define INDEX_IN_BITMASK_MASK 0x0000001F    
 
-#define PQ_TRESH_FUTURE_SLOTS 3072
+#define PQ_TRESH_FUTURE_SLOTS 6144
 
 
 #define PQ_CTM_RING_DIFF(_to, _from) (((_to) - (_from)) & PQ_CTM_MASK)
@@ -273,11 +273,11 @@ __shared __lmem struct nfd_in_pkt_desc lm_pacing_queue[PQ_LM_LENGTH];
 
 __shared __gpr uint32_t pq_ctm_head = 0;
 __shared __gpr uint64_t pq_head_time = 0;
-__shared __gpr uint32_t pq_ctm_sync_end = 128;
+__shared __gpr uint32_t pq_ctm_sync_end = PQ_LM_SYNC_LENGTH;
 
 __shared __gpr uint32_t pq_lm_head = 0;
 __shared __gpr uint32_t pq_lm_dequeue_cnt = 0;
-__shared __gpr uint32_t pq_lm_sync_end = 128;
+__shared __gpr uint32_t pq_lm_sync_end = PQ_LM_SYNC_LENGTH;
 
 __shared __lmem uint32_t bitmasks[PQ_BITMASKS_LENGTH];
 __shared __lmem uint32_t lm_bitmasks[LM_BITMASKS_LENGTH];
@@ -680,7 +680,7 @@ notify_setup(int side)
     raise_signal(&wq_sig7);
 
     /* Initialize head timer, and align it to slots */
-    pq_head_time = get_current_time() & ~((uint64_t)PQ_SLOT_TICKS - 1ull);
+    pq_head_time = 0;
 }
 
 
