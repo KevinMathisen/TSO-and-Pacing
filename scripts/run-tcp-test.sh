@@ -16,6 +16,9 @@ IP_MODIFIED="10.111.0.1"
 SENDER=kevinnm@192.168.1.98
 # SENDER=kevinm@10.0.254.4
 
+USER="kevinnm"
+# USER="kevinm"
+
 DUR=1   # seconds to run
 FLOWS=2 # parallel flows to run
 OUT=/tmp/tcp-test-output
@@ -110,7 +113,7 @@ ethtool -S "$NFP_IF" > "$OUT/ethtool_stats.after"
 echo "Copying output to $PERSIST (overwriting existing data)"
 rm -rf "$PERSIST"/*
 cp -a "$OUT"/cap-* "$OUT"/*.log "$OUT"/ethtool_stats* "$PERSIST"/
-chown -R kevinnm:kevinnm "$PERSIST"
+chown -R $USER:$USER "$PERSIST"
 
 umount "$OUT"
 # no need to restore other nic/cpu changes, as we only use machine for testing
