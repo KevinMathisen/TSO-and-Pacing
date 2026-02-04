@@ -835,7 +835,7 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 
 	Firmware:
 		Does not use l3/l4 offset values
-		Interprets vlan field as IPG in 100ns ticks
+		Interprets vlan field as IPG in 250ns ticks
 		(If later use time wheel, can set IPG in time wheel slots)
 
 	Convert sk_pacing_rate (B/s) -> IPG in 250ns (12 bits -> 250ns - 1.024ms)
