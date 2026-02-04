@@ -102,7 +102,6 @@ static SIGNAL wq_sig0, wq_sig1, wq_sig2, wq_sig3;
 static SIGNAL wq_sig4, wq_sig5, wq_sig6, wq_sig7;
 static SIGNAL msg_sig0, msg_sig1, qc_sig;
 static SIGNAL get_order_sig;    /* Signal for reordering before issuing get */
-static SIGNAL msg_order_sig;    /* Signal for reordering on message return */
 static SIGNAL_MASK wait_msk;
 static unsigned int next_ctx;
 
@@ -370,8 +369,6 @@ raise_signal(SIGNAL *sig)
 
 #define _BATCH_IN_TO_LM(_pkt)                                               \
 do {                                                                        \
-    /* TODO: may only copy slots with packet in bitmask */                  \
-                                                                            \
     lm_index = old_pq_lm_sync_end+_pkt;                                     \
                                                                             \
     /* If we dont overwrite packet in lm, insert slot to lm */              \
@@ -695,9 +692,7 @@ notify_setup_shared()
 #endif
 
     /* Kick off ordering */
-    reorder_start(NFD_IN_NOTIFY_MANAGER0, &msg_order_sig);
     reorder_start(NFD_IN_NOTIFY_MANAGER0, &get_order_sig);
-    reorder_start(NFD_IN_NOTIFY_MANAGER1, &msg_order_sig);
     reorder_start(NFD_IN_NOTIFY_MANAGER1, &get_order_sig);
 
     /* Initialize head timer, and align it to slots */
@@ -1015,7 +1010,7 @@ do {                                                                         \
             /* if it is last LSO being read from ring */                     \
             if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) {            \
                 /* k_pace: update last departure time (substract last add)*/ \
-                /* todo: last add may not be ipg */                          \
+                /* todo: last add may not be full ipg */                     \
                 flows_prev_dep_time[flow_id] = dep_time-ipg_ticks;           \
                                                                              \
                 /* Break out of loop processing LSO ring */                  \
@@ -1033,10 +1028,6 @@ sync_dequeue_loop() {
 
     sync_ctm_lm();
     dequeue_pacing_queue();
-
-    /* Participate in msg ordering */
-    wait_for_all(&msg_order_sig);
-    reorder_done_opt(&next_ctx, &msg_order_sig);
 }
 
 /**
@@ -1204,10 +1195,6 @@ _notify(__shared __gpr unsigned int *complete,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
     }
-
-    /* Participate in msg ordering */
-    wait_for_all(&msg_order_sig);
-    reorder_done_opt(&next_ctx, &msg_order_sig);
 }
 
 
@@ -1239,8 +1226,6 @@ notify_manager_reorder()
     /* Participate in ordering */
     wait_for_all(&get_order_sig);
     reorder_done_opt(&next_ctx, &get_order_sig);
-    wait_for_all(&msg_order_sig);
-    reorder_done_opt(&next_ctx, &msg_order_sig);
 }
 
 
