@@ -7,7 +7,7 @@ if (( EUID != 0 )); then
 fi
 
 IF="enp1s0np1"
-
+# IF="enp2s0np0"
 
 CPU_CORE=3
 CPU_GOV="powersave"

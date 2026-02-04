@@ -9,6 +9,8 @@ fi
 
 IP_IF="10.111.0.1"
 IP_ATTACHED="10.111.0.3"
+# IP_IF="192.168.50.1"
+# IP_ATTACHED="192.168.50.2"
 
 FW_TREE="$HOME/master/modified-nfp-firmware"
 DRV_TREE="$HOME/master/modified-nfp-oot-driver-2019"

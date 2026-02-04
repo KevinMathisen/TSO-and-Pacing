@@ -7,9 +7,15 @@ if (( EUID != 0 )); then
 fi
 
 NFP_IF="enp2s0np0"
-IP1="10.111.0.3"
-IP2="10.111.0.1"
+# NFP_IF="enp1s0np1"
+IP_TESTER="10.111.0.3"
+IP_MODIFIED="10.111.0.1"
+# IP_TESTER="192.168.50.2"
+# IP_MODIFIED="192.168.50.1"
+
 SENDER=kevinnm@192.168.1.98
+# SENDER=kevinm@10.0.254.4
+
 DUR=1   # seconds to run
 FLOWS=2 # parallel flows to run
 OUT=/tmp/tcp-test-output
@@ -21,11 +27,11 @@ pin_rx_to_cpu3() {
   # Dont need to revert changes to netronome card as it is only used for testing
   echo "Pinning all received packets on $NFP_IF to cpu 3"
 
-  # set core 3 to performance mode (instead of powersave)
-  sudo cpufreq-set -c 3 -g performance 
+  # set all cores to performance mode (instead of powersave)
+  cpufreq-set -g performance 
 
   # ensure gro does not batch rx packets (default is to batch 8 packets even when gro off)
-  sudo sysctl -w net.core.gro_normal_batch=1
+  sysctl -w net.core.gro_normal_batch=1
 
   # stop irqbalance so it doesnt move around IRQs
   systemctl stop irqbalance || true
@@ -78,7 +84,7 @@ echo "Starting packet capture (pinned to cpu 2)"
 # (ignore ACKs for now, and pin to cpu 2 to keep cpu 3 as idle as possible. )
 chrt -f 20 netsniff-ng --in "$NFP_IF" --out "$OUT" \
   --interval 1GiB --prefix cap- --silent \
-  --filter "tcp and host $IP2 and dst port 5201" \
+  --filter "tcp and host $IP_MODIFIED and dst port 5201" \
   --bind-cpu 2 --notouch-irq --sg --ring-size 128MiB -T 0xa1b23c4d \
   >"$OUT/capture.log" 2>&1 &
 PC_PID=$!
@@ -88,7 +94,7 @@ echo ""
 echo "Starting sending data on netronome2"
 # (2 flows, 128K read from buffer each send call, send output to client)
 ssh -o StrictHostKeyChecking=no "$SENDER" \
-  "iperf3 -c $IP1 -t $DUR -i 0 -l 128K -P $FLOWS --get-server-output" \
+  "iperf3 -c $IP_TESTER -t $DUR -i 0 -l 128K -P $FLOWS --get-server-output" \
   | tee "$OUT/iperf_client.log"
 
 echo ""
@@ -108,6 +114,6 @@ chown -R kevinnm:kevinnm "$PERSIST"
 
 umount "$OUT"
 # no need to restore other nic/cpu changes, as we only use machine for testing
-sudo cpufreq-set -c 3 -g powersave
+sudo cpufreq-set -g powersave
 
 echo "Test finished sucessfully, output in $PERSIST"
