@@ -18,15 +18,13 @@ For compiling the modified NFP driver and CoreNIC firmware a machine with the fo
   - Download drivers: `git clone https://github.com/Netronome/nfp-drv-kmods.git`
   - Go back to correct version: `git checkout c44a501006f85050c4a1f0fbfd1031d56743ce7b`
 - (For testing)
-  - `iperf3`
+  - `iperf3`, `ethtool`
 
 #### Server 2
 Also, for running the test you need a machine with another Agilio CX SmartNIC, directly attached to the one we are modifying:
 - A Netronome Agilio CX 4000 SmartNIC 2x10GbE
 - Ubuntu 18.04, with Linux kernel 5.4
-- `netsniff-ng`
-- `iperf3`
-- `mergecap`
+- `netsniff-ng`, `iperf3`, `mergecap`, `cpufrequtils`, `ethtool`
 
 #### PC
 And a personal machine for generating plots based on the packet captures from tests:
