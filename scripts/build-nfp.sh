@@ -7,10 +7,15 @@ if (( EUID != 0 )); then
   exit 1
 fi
 
+IP_IF="10.111.0.1"
+IP_ATTACHED="10.111.0.3"
+
 FW_TREE="$HOME/master/modified-nfp-firmware"
 DRV_TREE="$HOME/master/modified-nfp-oot-driver-2019"
 ORG_FW_TREE="$HOME/master/org-nfp-firmware"
 ORG_DRV_TREE="$HOME/master/nfp-oot-driver-2019"
+
+
 FW_NAME="nic_AMDA0096-0001_2x10.nffw"
 FW_DST_DIR="/lib/firmware/netronome"
 NFP_IF="enp2s0np0"
@@ -20,6 +25,8 @@ SKIP_DRIVER=false
 SKIP_CHECK=false
 SKIP_BUILD=false
 CLEAN=false
+DEV=false
+
 
 for arg in "$@"; do
   case "$arg" in
@@ -31,8 +38,9 @@ for arg in "$@"; do
     --org)          FW_TREE="$ORG_FW_TREE"; DRV_TREE="$ORG_DRV_TREE"; SKIP_BUILD=true ;;
     --org-fw)       FW_TREE="$ORG_FW_TREE"; SKIP_BUILD=true ;;
     --org-driver)   DRV_TREE="$ORG_DRV_TREE"; SKIP_BUILD=true ;;
-    --help)         echo " usage (--help --skip-fw --skip-driver --skip-check --skip-build --clean --org --org-fw --org-driver)"; exit 0 ;;
-    *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --skip-build --clean --org --org-fw --org-driver)"; exit 1 ;;
+    --dev)          DEV=true ;;
+    --help)         echo " usage (--help --skip-fw --skip-driver --skip-check --skip-build --clean --org --org-fw --org-driver --dev)"; exit 0 ;;
+    *) echo "Unknown argument: $arg, usage (--help --skip-fw --skip-driver --skip-check --skip-build --clean --org --org-fw --org-driver --dev)"; exit 1 ;;
   esac
 done
 
@@ -62,7 +70,11 @@ if [ "$SKIP_FW" = false ]; then
     echo "== Reload driver =="
     depmod -a
     modprobe -r nfp 2>/dev/null || true
-    modprobe nfp nfp_dev_cpp=1
+    if [ "DEV" = true ]; then
+      modprobe nfp nfp_dev_cpp=1
+    else
+      modprobe nfp
+    fi
   fi
   update-initramfs -u 2>/dev/null
 
@@ -81,16 +93,29 @@ if [ "$SKIP_DRIVER" = false ]; then
     if [ "$CLEAN" = true ]; then
         make clean
     fi
-    make nfp_dev_cpp=1
+
+    if [ "DEV" = true ]; then
+      make nfp_dev_cpp=1
+    else
+      make
+    fi
   fi
 
   echo "== Install driver =="
-  sudo make nfp_dev_cpp=1 install
+  if [ "DEV" = true ]; then
+    make nfp_dev_cpp=1 install
+  else
+    make install
+  fi 
 
   echo "== Reload driver =="
   depmod -a
   modprobe -r nfp 2>/dev/null || true
-  modprobe nfp nfp_dev_cpp=1
+  if [ "DEV" = true ]; then
+    modprobe nfp nfp_dev_cpp=1
+  else
+    modprobe nfp
+  fi
   update-initramfs -u 2>/dev/null
 
 else
@@ -104,44 +129,47 @@ if [ "$SKIP_CHECK" = false ]; then
   echo ""
   echo "== Quick health checks =="
   echo ""
-  echo "-- nfp module path/version (should show .../extra/... if loaded custom drivers, and dev_cpp enabled) --"
+  echo "== nfp module path/version (should show .../extra/... if loaded custom drivers, and dev_cpp enabled) =="
   modinfo -n nfp
   modinfo nfp | egrep -i 'version|o-o-t|filename|cpp' || true
-  ls /dev | grep cpp
+  echo ""
+  ls /dev | grep cpp || echo "NB: no dev_cpp interface found!"
+  echo ""
   echo "live nfp module srcversion: $(cat /sys/module/nfp/srcversion)"
   echo "disk nfp module srcversion: $(modinfo -F srcversion "$DRV_TREE/src/nfp.ko")"
 
   echo ""
-  echo "-- check firmware logs if loaded and no errors --"
+  echo "==== check firmware logs if loaded and no errors ===="
   logs="$(dmesg)"
   if grep -q 'enp2s0np0 down' <<< "$logs"; then
     printf '%s\n' "$logs" | tac | sed '1,/enp2s0np0 down/!d' | tac
   fi
 
   echo ""
-  echo "-- firmware files present --"
+  echo "==== firmware files present ===="
   ls -l "$FW_DST_DIR" | sed -n '1,200p'
 
   echo ""
-  echo "-- driver bound to interface --"
+  echo "==== driver bound to interface ===="
   ethtool -i "$NFP_IF" || true
 
   echo ""
-  echo "-- offloads (expect TSO on) --"
+  echo "==== offloads (expect TSO on) ===="
   ethtool -K enp2s0np0 tso on gso on
   ethtool -k "$NFP_IF" | egrep 'tcp-segmentation-offload'
 
   echo ""
-  echo "-- IP address of Netronome interface (should be 10.111.0.1/24) --"
+  echo "==== IP address of Netronome interface (should be $IP_IF) ===="
   ip -4 addr show "$NFP_IF"
 
   echo ""
-  echo "-- connectivity over the direct link --"
-  ping -c 3 10.111.0.3 || true
+  echo "==== connectivity over the direct link ===="
+  ping -c 3 $IP_ATTACHED || true
 
   echo ""
-  echo "-- active qdisc on interface (should be cake with bandwidth 1Gbit and no-split-gso)"
-  tc qdisc replace dev enp2s0np0 root cake bandwidth 1gbit besteffort flows no-split-gso
+  echo "==== active qdisc on interface ===="
+  # tc qdisc replace dev enp2s0np0 root cake bandwidth 1gbit besteffort flows no-split-gso || echo "Cake not available"
+  tc qdisc replace dev "$NFP_IF" root fq
   tc qdisc show dev "$NFP_IF"
 
 else
