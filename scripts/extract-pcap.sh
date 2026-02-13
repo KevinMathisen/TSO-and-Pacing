@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+SERVER=net1
+#SERVER=muninn
+
 NET1_DIR="/var/tmp/tcp-test-output"
 OUT_DIR="./test-data"
 IP="10.111.0.3"
@@ -22,7 +25,7 @@ CSV_OUT="$RUN_DIR"/packets.csv
 echo ""
 echo "Extract headers from pcap files on net1:$NET1_DIR"
 
-ssh net1 NET1_DIR="$NET1_DIR" SNAPLEN="$SNAPLEN" 'bash -s' <<'REMOTE'
+ssh $SERVER NET1_DIR="$NET1_DIR" SNAPLEN="$SNAPLEN" 'bash -s' <<'REMOTE'
 set -euo pipefail
 cd "$NET1_DIR"
 shopt -s nullglob
@@ -36,7 +39,7 @@ REMOTE
 
 echo ""
 echo "Get files from netronome puter"
-rsync -a net1:"$NET1_DIR"/ "$RUN_DIR"/
+rsync -a $SERVER:"$NET1_DIR"/ "$RUN_DIR"/
 
 echo ""
 echo "Decompress pcap"
