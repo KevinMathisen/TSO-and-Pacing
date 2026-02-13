@@ -198,6 +198,7 @@ static __shared __gpr unsigned int dst_q_seqn = 0;
 #else /* (NFD_IN_NUM_SEQRS == 1) */
 #define NFD_IN_SEQN_PTR *l$index3
 /* Add sequence numbers, using a LM to store */
+/* k_pace: NFD_IN_NUM_SEQRS is set to 8 on our machine! */
 static __shared __lmem unsigned int seq_nums[NFD_IN_NUM_SEQRS];
 #endif /* (NFD_IN_NUM_SEQRS == 1) */
 
@@ -347,6 +348,8 @@ __gpr uint32_t next_batch_out = 0;
 /* FlowID mapping to previous departure time */
 __shared __lmem uint64_t flows_prev_dep_time[8];
 
+/* For counting queue increments (NFD_IN_NUM_SEQRS=8) */
+__shared __lmem uint32_t local_qc_queue[NFD_IN_NUM_SEQRS];
 
 /* --------------------- k_pace utilies ------------------------------------ */
 
@@ -442,10 +445,11 @@ do {                                                                        \
     if (!signal_test(&wq_sig##_pkt)) { DEBUG(0x0001); halt(); }             \
                                                                             \
     raw0_buff = lm_pacing_queue[pq_lm_head].__raw[0];                       \
+    q_num = NFD_IN_SEQR_NUM(raw0_buff);                                     \
                                                                             \
     /* Point csr addr 3 (seqn_ptr) to correct queue */                      \
     local_csr_write(local_csr_active_lm_addr_3,                             \
-        (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);                  \
+        (uint32_t) &seq_nums[q_num]);                                       \
                                                                             \
     /* Set seqn of packet, then increase counter */                         \
     __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }                  \
@@ -468,7 +472,7 @@ __intrinsic void
 dequeue_pacing_queue() {
     __gpr uint32_t raw0_buff;
     uint64_t now;
-    uint32_t index_in_bitmask, bitmask_index, slots_to_send;
+    uint32_t index_in_bitmask, bitmask_index, slots_to_send, q_num;
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
 
     /* We are not done until we reach current time (slots_to_send == 0) */
@@ -501,6 +505,7 @@ dequeue_pacing_queue() {
         if (slots_to_send == 0) break;
 
         /* --- We are now checking slot pq_head points to */
+        q_num = 32;
 
         /* Calculate which bitmask to check */
         bitmask_index = pq_ctm_head >> INDEX_TO_BITMASK_SHIFT;
@@ -538,6 +543,23 @@ dequeue_pacing_queue() {
         pq_head_time += PQ_SLOT_TICKS; 
 
         pq_lm_dequeue_cnt++;
+
+        if (q_num == 32) continue;
+        /* If a packet was dequeued, check if we need to increment TX_R 
+            If so, wait until qc_sig is available */
+        local_qc_queue[q_num]++;
+        if (local_qc_queue[q_num] >= 8) wait_for_any(&qc_sig);
+
+        /* After waiting for raised qc_sig, check if still need to incr TX_R 
+            (as other threads may have done this work for us) */
+        if (local_qc_queue[q_num] >= 8) {
+            unsigned int qc_queue;
+            local_qc_queue[q_num] -= 8;
+            qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(q_num), NFD_IN_TX_QUEUE);
+            wait_for_all(&qc_sig);
+            __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, 8,
+                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+        }
     }
 }
 
@@ -725,7 +747,11 @@ notify_setup(int side)
 
     /* ------ k_pace: init & setup ------- */
 
-    /* Raised wq signals to signal that batch_out is available 
+    /* Managers do not need our setup */
+    if (ctx() == NFD_IN_NOTIFY_MANAGER0 || ctx() == NFD_IN_NOTIFY_MANAGER1)
+        return;
+    
+    /* Raise wq signals to signal that batch_out is available 
        (our solution assumes xwrite only available if it's signal is raised) */
     raise_signal(&wq_sig0);
     raise_signal(&wq_sig1);
@@ -735,6 +761,8 @@ notify_setup(int side)
     raise_signal(&wq_sig5);
     raise_signal(&wq_sig6);
     raise_signal(&wq_sig7);
+
+    raise_signal(&qc_sig);
 
 }
 
@@ -1082,8 +1110,7 @@ _notify(__shared __gpr unsigned int *complete,
             alu[*served, *served, +, NFD_IN_MAX_BATCH_SZ];
         }
 
-        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1);
-        __implicit_read(&qc_sig);
+        wait_msk = __signals(&msg_sig0, &msg_sig1);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
 
@@ -1113,13 +1140,6 @@ _notify(__shared __gpr unsigned int *complete,
             _NOTIFY_PROC;
         }
 
-        /* Map batch.queue to a QC queue and increment the TX_R pointer
-         * for that queue by n_batch */
-        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
-                               NFD_IN_TX_QUEUE);
-        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
-                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
-
     } else if (num_avail > 0) {
         /* There is a partial batch - process messages one at a time. */
         unsigned int partial_served = 0;
@@ -1131,16 +1151,10 @@ _notify(__shared __gpr unsigned int *complete,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
         wait_sig_mask(wait_msk);
-        __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
 
 
-        /* This is the first message in the batch. Do not wait for
-         * signals that will not be set while processing a partial
-         * batch and store batch info. */
-        n_batch = batch_in.pkt0.num_batch;
-        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
-                               NFD_IN_TX_QUEUE);
+        /* This is the first message in the batch. */
         wait_msk = __signals(&msg_sig0);
 
         /* Interface and queue info is the same for all packets in batch */
@@ -1184,15 +1198,11 @@ _notify(__shared __gpr unsigned int *complete,
         __implicit_read(&msg_sig0);
 
         /* Set up wait_msk to process a full batch next */
-        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig);
+        wait_msk = __signals(&msg_sig0, &msg_sig1);
 
         /* Process the final descriptor from the batch */
         lm_batch_in = batch_in.pkt0;
         _NOTIFY_PROC;
-
-        /* Increment the TX_R pointer for this queue by n_batch */
-        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
-                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
     }
 }
