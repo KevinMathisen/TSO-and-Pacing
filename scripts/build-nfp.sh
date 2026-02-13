@@ -72,7 +72,7 @@ if [ "$SKIP_FW" = false ]; then
     echo "== Reload driver =="
     depmod -a
     modprobe -r nfp 2>/dev/null || true
-    if [ "DEV" = true ]; then
+    if [ "$DEV" = true ]; then
       modprobe nfp nfp_dev_cpp=1
     else
       modprobe nfp
@@ -96,7 +96,7 @@ if [ "$SKIP_DRIVER" = false ]; then
         make clean
     fi
 
-    if [ "DEV" = true ]; then
+    if [ "$DEV" = true ]; then
       make nfp_dev_cpp=1
     else
       make
@@ -104,7 +104,7 @@ if [ "$SKIP_DRIVER" = false ]; then
   fi
 
   echo "== Install driver =="
-  if [ "DEV" = true ]; then
+  if [ "$DEV" = true ]; then
     make nfp_dev_cpp=1 install
   else
     make install
@@ -113,7 +113,7 @@ if [ "$SKIP_DRIVER" = false ]; then
   echo "== Reload driver =="
   depmod -a
   modprobe -r nfp 2>/dev/null || true
-  if [ "DEV" = true ]; then
+  if [ "$DEV" = true ]; then
     modprobe nfp nfp_dev_cpp=1
   else
     modprobe nfp
