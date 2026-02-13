@@ -122,3 +122,74 @@ This generates a packet capture, which can be extracted by running the [`extract
 ```bash
 sudo ./extract-pcap.sh
 ```
+
+
+## Help, nothing works! 
+So, you want to modify and compile custom drivers+firmware for a 10 Gbps SmartNIC. And nothing works? Here are some common pitfalls I encountered at least.
+
+#### Hardware not recoginized
+Sometimes (seemingly at random) the NFP driver load fails. This can be seen by... the fact that the interface does not work, e.g. you can't ping the other netronome card.
+```bash
+dmesg | grep nfp | tail -n 300
+[51949.364539] nfp 0000:02:00.0 enp2s0np0: enp2s0np0 down
+[51949.540390] nfp 0000:02:00.0 enp2s0np1: enp2s0np1 down
+[51953.015350] nfp 0000:02:00.0: Firmware safely unloaded
+...
+[51953.099385] nfp 0000:02:00.0: Model: 0x40010010, SN: 00:15:4d:13:5c:8c, Ifc: 0x10ff
+[51953.104454] nfp 0000:02:00.0: nfp_hwinfo: Unknown HWInfo version: 0x60000000
+...
+[53668.201353] nfp 0000:02:00.0: nfp_hwinfo: Unknown HWInfo version: 0x60000000
+[53668.306517] nfp 0000:02:00.0: nfp_hwinfo: NFP access error
+[53668.306526] nfp 0000:02:00.0: nfp: NFP board initialization timeout
+[53668.306854] nfp: probe of 0000:02:00.0 failed with error -22
+```
+HFInfo is something the ARM firmware on netronome card builds after the chip resets ([source](https://coral.googlesource.com/linux-imx/%2B/refs/tags/11-2/drivers/net/ethernet/netronome/nfp/nfpcore/nfp_hwinfo.c)). If the version field is never set it implies something goes wrong when loading the custom firmware on the card. 
+
+The solution? Reboot the machine (and possibly rebuild and load the firmware). Do this as many times it takes. I have found no other way to fix the issue, where resetting (or unbind/binding) the card does not work. 
+
+#### Random behavior
+Hopefully I will be able to fix this. If not I am sorry.
+
+The current solution works perfectly, as long as you dont load the NFP module with `nfp_dev_cpp=1`. For some reason, when using `nfp_dev_cpp`, it interacts with our pacing solution and causes it to randomly drop packets, reduce the time wheel's throughput, and eventually cause a complete loss of transmissions. 
+
+This seems to happen per-flow, so for multiple active flows, only one may excibit this behavior at first, with the others following later (up to several seconds, millions of packets, later). Other times all flows imediatelly stop sending data. When trying to ping after e.g. 4 flows causes their transmission to stop, sometimes it works, sometimes not. 
+Other times the solution works as expected (for several hours) even with `nfp_dev_cpp`, but this is only 1 out of 10 runs. 
+
+The per-flow behavior seems to indicate that `nfp_dev_cpp` somehow interacts with the per-flow state, either in the driver or firmware, which causes the erratic behavior. 
+
+So far, our only solution is to disable `nfp_dev_cpp`. This of course prevents you from reading the memory of the NIC. 
+
+(Can also mention that is it not the firmware which freezes which cause this, debugging shows that the Notify ME continues to run after stopping to transmit, not placing any packets in the time wheel. Moreover, packet reception still works.)
+
+#### Card stops transmission
+Another case of card freezes is if the `halt()` command runs in Notify, or if there is a deadlock (i.e. the threads are waiting for signals which are never raised.)
+
+Try to place debug statements to find out if these are your culprint.
+
+---
+
+---
+
+## IFI Subject recommendations
+Recommendations for other students working on the Netronome cards at IFI.
+
+**IN5050 – Programming heterogeneous multi-core architectures**
+Fun and educational course. A lot of practial programming (as opposed to many other IFI courses...). Good practice for writing reports, troubleshooting, and benchmarking. Also good for low-level programming/hardware architecture, which is essential for working on the Netronome Cards.
+And no final exam! Only 3 reports during the semester.
+
+**IN5170 – Models of Concurrency** 
+This course is all right, decent lecturers and a decent workload. Exam was relatively easy (ask me for previous exams for practice if you want, they dont publish them for some reason).
+Good for gaining intuitive understanding of concurrency, deadlocks, and synchronization mechanisms, and practical real-world implementations of these (Java, Golang <3, and Rust) (also brief mention of Erland :( and C#)).
+Also, only 2 small obligs the whole semester, each took only one afternoon to complete! 
+
+**IN5060 – Quantitative Performance Analysis**
+Not that technical, but good practice for handling and anlysing data sets for research purposes, visualizing data/results, and presenting this for a crowd. 
+
+**IN4230 – Computer Networks** 
+Course I proabably should have taken. Introduction to networks (in detail), and especially relevant in that you program network protocols in C. Very relevant for both driver and firmware modifications for the netronome cards.
+
+**IN4120 – Search Technology** 
+Good course+lecturer, fun exercises, however not *that* relevant to the thesis. Covers lot of different topics within search engines which can also be applied in other fields (compression, data stuctures, fun text handling, vectors/embedding of language/text, basic machine learning)
+
+(Also, use [karakterweb](https://www.karakterweb.no/) to see difficulty and ratings of IFI subjects)
+
