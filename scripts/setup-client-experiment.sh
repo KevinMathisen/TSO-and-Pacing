@@ -7,7 +7,7 @@ if (( EUID != 0 )); then
 fi
 
 DEV="enp2s0np0"
-CONNECTION_MODE="internet"  # direct-link, internet, datacenter, or datacenter-high-contention 
+CONNECTION_MODE="direct-link"  # direct-link, internet, datacenter, or datacenter-high-contention 
 
 for arg in "$@"; do
   case "$arg" in
@@ -20,6 +20,11 @@ for arg in "$@"; do
   esac
 done
 
+
+# disable gro to make ingress qdisc operate on individual packets, 
+#  more closely mirroring a real network device.
+ethtool -K $DEV gro off
+# TODO: know still achieve line rate on IFI machines for this, but need to test on darmstadt.
 
 # reset
 tc qdisc del dev $DEV root    2>/dev/null || true
@@ -52,7 +57,7 @@ if [ "$CONNECTION_MODE" = "internet" ]; then
 
     # Leaf fq_codel
     tc qdisc replace dev ifb0 parent 1:10 handle 10: fq_codel \
-      ecn target 5ms interval 50ms memory_limit 16mb
+      noecn target 5ms interval 50ms memory_limit 16mb
 
     echo "Interface $DEV configured with Internet (50 ms RTT, 1 Gbps)"
 
