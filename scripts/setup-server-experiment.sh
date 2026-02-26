@@ -10,12 +10,27 @@ DEV="enp2s0np0"
 # 1 = no TSO, 2 = TSO, 3 = TSO + our solution
 TREATMENT=1
 
-# internet -> 2 flows, datacenter -> 4 flows
+# direct-link -> 2, internet -> 4 flows, datacenter -> 8 flows
 CONNECTION_MODE="internet" 
 
 CCA="cubic" # cubic, dctcp, bbr
 
-QDISC="fq" # fq (in future maybe pfifo_fast, fq_codel, cake)
+QDISC="fq" # fq, fq_codel  (in future maybe pfifo_fast, cake)
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-tso)       TREATMENT=1 ;;
+    --tso)          TREATMENT=2 ;;
+    --tso-pacing)   TREATMENT=3 ;;
+    --cubic)        CCA="cubic" ;;
+    --dctcp)        CCA="dctcp" ;;
+    --bbr)          CCA="bbr" ;;
+    --fq)           QDISC="fq" ;;
+    --fq-codel)     QDISC="fq_codel" ;;
+    --help)         echo " usage (--help --no-tso --tso --tso-pacing --cubic --dctcp --bbr --fq --fq-codel)"; exit 0 ;;
+    *) echo "Unknown argument: $arg, usage (--help --no-tso --tso --tso-pacing --cubic --dctcp --bbr --fq --fq-codel)"; exit 1 ;;
+  esac
+done
 
 # ======= Load driver/firmware =======
 if [ "$TREATMENT" = 3 ]; then

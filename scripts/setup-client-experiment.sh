@@ -9,6 +9,17 @@ fi
 DEV="enp2s0np0"
 CONNECTION_MODE="internet"  # direct-link, internet, datacenter, or datacenter-high-contention 
 
+for arg in "$@"; do
+  case "$arg" in
+    --direct-link)   CONNECTION_MODE="direct-link" ;;
+    --internet)      CONNECTION_MODE="internet" ;;
+    --datacenter)    CONNECTION_MODE="datacenter" ;;
+    --datacenter-hc) CONNECTION_MODE="datacenter-high-contention" ;;
+    --help)         echo " usage (--help --direct-link --internet --datacenter --datacenter-hc)"; exit 0 ;;
+    *) echo "Unknown argument: $arg, usage (--help --direct-link --internet --datacenter --datacenter-hc)"; exit 1 ;;
+  esac
+done
+
 
 # reset
 tc qdisc del dev $DEV root    2>/dev/null || true
