@@ -13,9 +13,9 @@ TREATMENT=1
 # internet -> 2 flows, datacenter -> 4 flows
 CONNECTION_MODE="internet" 
 
-CCA="CUBIC" # CUBIC or BBR
+CCA="cubic" # cubic, dctcp, bbr
 
-QDISC="fq" # fq (in future, maybe pfifo_fast, fq_codel, cake)
+QDISC="fq" # fq (in future maybe pfifo_fast, fq_codel, cake)
 
 # ======= Load driver/firmware =======
 if [ "$TREATMENT" = 3 ]; then
@@ -28,15 +28,16 @@ fi
 cpufreq-set -g performance
 
 if [ "$TREATMENT" = 1 ]; then
-    ethtool -K "$DEV" tso off
+    ethtool -K "$DEV" tso off gso off
 else
-    ethtool -K "$DEV" tso on
+    ethtool -K "$DEV" tso on gso on
 fi
 
-if [ "$CCA" = "BBR" ]; then
-    sysctl net.ipv4.tcp_congestion_control=bbr
+sysctl net.ipv4.tcp_congestion_control="$CCA"
+if [ "$CCA" = "dctcp" || "$CCA" = "bbr" ]; then
+    sysctl -w net.ipv4.tcp_ecn=1
 else
-    sysctl net.ipv4.tcp_congestion_control=cubic
+    sysctl -w net.ipv4.tcp_ecn=2
 fi
 
 tc qdisc replace dev "$DEV" root "$QDISC"
