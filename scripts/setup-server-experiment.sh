@@ -34,7 +34,7 @@ else
 fi
 
 sysctl net.ipv4.tcp_congestion_control="$CCA"
-if [ "$CCA" = "dctcp" || "$CCA" = "bbr" ]; then
+if [ "$CCA" = "dctcp" ]; then
     sysctl -w net.ipv4.tcp_ecn=1
 else
     sysctl -w net.ipv4.tcp_ecn=2
