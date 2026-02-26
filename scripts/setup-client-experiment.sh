@@ -45,7 +45,7 @@ if [ "$CONNECTION_MODE" = "internet" ]; then
 
     echo "Interface $DEV configured with Internet (50 ms RTT, 1 Gbps)"
 
-elif [ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-high-contention" ]; then
+elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-high-contention" ]]; then
     # egress no delay
     # ...
 
