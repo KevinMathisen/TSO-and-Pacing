@@ -472,7 +472,7 @@ __intrinsic void
 dequeue_pacing_queue() {
     __gpr uint32_t raw0_buff;
     uint64_t now;
-    uint32_t index_in_bitmask, bitmask_index, slots_to_send, q_num;
+    uint32_t index_in_bitmask, bitmask_index, slots_to_send, q_num, incr_tx;
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
 
     /* We are not done until we reach current time (slots_to_send == 0) */
@@ -506,6 +506,7 @@ dequeue_pacing_queue() {
 
         /* --- We are now checking slot pq_head points to */
         q_num = 32;
+        incr_tx = 0;
 
         /* Calculate which bitmask to check */
         bitmask_index = pq_ctm_head >> INDEX_TO_BITMASK_SHIFT;
@@ -534,6 +535,15 @@ dequeue_pacing_queue() {
                         ~(1u << (pq_lm_head & INDEX_IN_BITMASK_MASK) );
         }
 
+        /* If a packet was dequeued, and it is either not LSO or 
+            last LSO pacekt, save this */
+        if (qnum != 32 && (
+            lm_pacing_queue[pq_lm_head].lso == NFD_IN_ISSUED_DESC_LSO_NULL ||
+            lm_pacing_queue[pq_lm_head].lso == NFD_IN_ISSUED_DESC_LSO_RET )) 
+        {
+            incr_tx = 1;
+        }
+
         /* Let other threads know we have checked slot at head, 
             so we move pq_head one forward */
         pq_ctm_head++;
@@ -544,21 +554,25 @@ dequeue_pacing_queue() {
 
         pq_lm_dequeue_cnt++;
 
-        if (q_num == 32) continue;
-        /* If a packet was dequeued, check if we need to increment TX_R 
-            If so, wait until qc_sig is available */
+        if (!incr_tx) continue;
+        
+        /* If a packet was dequeued (and in case of TSO is last segment), 
+            we need to increment TX_R. If so, wait until qc_sig is available */
         local_qc_queue[q_num]++;
-        if (local_qc_queue[q_num] >= 8) wait_for_any(&qc_sig);
+        if (local_qc_queue[q_num] != 0) wait_for_any(&qc_sig);
 
         /* After waiting for raised qc_sig, check if still need to incr TX_R 
             (as other threads may have done this work for us) */
-        if (local_qc_queue[q_num] >= 8) {
-            unsigned int qc_queue;
-            local_qc_queue[q_num] -= 8;
+        if (local_qc_queue[q_num] != 0) {
+            unsigned int qc_queue, incr_amount;
             qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(q_num), NFD_IN_TX_QUEUE);
-            wait_for_all(&qc_sig);
-            __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, 8,
-                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+
+            wait_for_all(&qc_sig); // clear signal
+
+            /* Increment with current outstanding dequeues, then reset outstanding */
+            __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, 
+                local_qc_queue[q_num], NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+            local_qc_queue[q_num] = 0;
         }
     }
 }
