@@ -30,6 +30,8 @@ ethtool -K $DEV gro off
 tc qdisc del dev $DEV root    2>/dev/null || true
 tc qdisc del dev $DEV ingress 2>/dev/null || true
 tc qdisc del dev ifb0 root    2>/dev/null || true
+sysctl -w net.ipv4.tcp_congestion_control=cubic
+sysctl -w net.ipv4.tcp_ecn=0
 
 if [ "$CONNECTION_MODE" != "direct-link" ]; then 
     # create/enable IFB
@@ -43,6 +45,7 @@ if [ "$CONNECTION_MODE" != "direct-link" ]; then
           action mirred egress redirect dev ifb0
 fi
 
+# Does not provide us with that much useful data, but is interesting to see that we dont always show benefit
 if [ "$CONNECTION_MODE" = "internet" ]; then 
     # egress 50 ms delay
     tc qdisc replace dev $DEV root netem delay 50ms limit 5000
@@ -65,8 +68,8 @@ elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-hi
     # egress no delay
     # ...
 
-    # ---- ingress 8 Gbps ----
-    RATE=8gbit
+    # ---- ingress 4 Gbps ----
+    RATE=4gbit
 
     tc qdisc replace dev ifb0 root handle 1: htb default 10
     tc class replace dev ifb0 parent 1: classid 1:1  htb rate $RATE ceil $RATE
@@ -74,12 +77,15 @@ elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-hi
 
     # Leaf fq_codel (shallow ecn marking)
     tc qdisc replace dev ifb0 parent 1:10 handle 10: fq_codel \
-      ecn target 1ms interval 5ms ce_threshold 100us memory_limit 4mb
+      ecn target 2ms interval 20ms ce_threshold 200us memory_limit 4mb
 
     if [ "$CONNECTION_MODE" = "datacenter-high-contention" ]; then
       tc qdisc replace dev ifb0 parent 1:10 handle 10: fq_codel \
-        ecn target 1ms interval 5ms ce_threshold 100us memory_limit 500kb # or 1mb
+        ecn target 2ms interval 20ms ce_threshold 200us memory_limit 200kb
     fi
+
+    sysctl -w net.ipv4.tcp_congestion_control=dctcp
+    sysctl -w net.ipv4.tcp_ecn=1
 
     echo "Interface $DEV configured with Datacenter (no delay, 8 Gbps)"
 
@@ -95,6 +101,7 @@ echo "Also set CPU freq to performance (use 'cpufreq-set -g powersave' to revert
 
 echo ""
 echo "You can now start iperf server... (iperf3 -s)"
+echo "Use 'tc -s qdisc show dev ifb0' to view ingress stats"
 
 
 # See:
