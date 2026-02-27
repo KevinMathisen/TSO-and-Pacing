@@ -719,7 +719,9 @@ msix_imod_check_can_send(const unsigned int pcie_isl, int qnum,
     if (cfg_irqc_ticks && (ticks >= cfg_irqc_ticks))
         return 0;
 
-    if (cfg_irqc_pkts && (pcnt >= cfg_irqc_pkts))
+    // k-pace: configure interrupt to only send every 8 packets
+    //  also this file is placed in /me/blocks/vnic/svc/
+    if (cfg_irqc_pkts && (pcnt >= 8)) 
         return 0;
 
     /*
