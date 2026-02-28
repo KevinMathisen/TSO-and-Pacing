@@ -456,7 +456,7 @@ do {                                                                        \
     __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }                   \
                                                                             \
     /* Set interface/PCIe num for packet */                                 \
-    __asm { alu[raw0_buff, raw0_buff, AND, 0xFFFFFF3F] }                    \
+    __asm { alu[raw0_buff, raw0_buff, AND~, 0xC0 ] }                        \
     __asm { alu[raw0_buff, raw0_buff, OR,  PCIE_ISL, <<6] }                 \
                                                                             \
     batch_out.pkt##_pkt## = lm_pacing_queue[pq_lm_head];                    \
@@ -539,14 +539,9 @@ dequeue_pacing_queue() {
                         ~(1u << (pq_lm_head & INDEX_IN_BITMASK_MASK) );
         }
 
-        /* If a packet was dequeued, and it is either not LSO or 
-            last LSO packet, save this */
-        if (qnum != 32 && (
-            lm_pacing_queue[pq_lm_head].intf == NFD_IN_ISSUED_DESC_LSO_NULL ||
-            lm_pacing_queue[pq_lm_head].intf == NFD_IN_ISSUED_DESC_LSO_RET )) 
-        {
+        /* If a packet was dequeued, and flag set to incr TX_R, save this */
+        if (q_num != 32 && lm_pacing_queue[pq_lm_head].intf == 2) 
             incr_tx = 1;
-        }
 
         /* Let other threads know we have checked slot at head, 
             so we move pq_head one forward */
@@ -790,7 +785,8 @@ do {                                                                    \
     wait_for_all(&wq_sig##_out);                                        \
                                                                         \
     /* Place desc in batch out, zero vlan field */                      \
-    batch_out.pkt##_out##.__raw[0] = lm_batch_in.__raw[0];              \
+    batch_out.pkt##_out##.__raw[0] = lm_batch_in.__raw[0]               \
+                                            & 0xFFFFFFBF;               \
     batch_out.pkt##_out##.__raw[1] = (lm_batch_in.__raw[1]              \
                                             | notify_reset_state_gpr);  \
     batch_out.pkt##_out##.__raw[2] = lm_batch_in.__raw[2];              \
@@ -893,8 +889,11 @@ do {                                                                         \
             pq_index = (pq_lm_head + delta_slots);                           \
             if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;          \
                                                                              \
-            /* Place packet in lm_pq at its dep time. Also zero vlan field */\
-            lm_pacing_queue[pq_index].__raw[0] = lm_batch_in.__raw[0];       \
+            /* Place packet in lm_pq at its dep time, zero vlan field */     \
+            /* since this is issued desc, set lso/intf field to 2 */         \
+            /*      to indicate that we need to increment TX_R */            \
+            lm_pacing_queue[pq_index].__raw[0] = lm_batch_in.__raw[0]        \
+                                                    & 0xFFFFFFBF;            \
             lm_pacing_queue[pq_index].__raw[1] = (lm_batch_in.__raw[1]       \
                                                 | notify_reset_state_gpr);   \
             lm_pacing_queue[pq_index].__raw[2] = lm_batch_in.__raw[2];       \
@@ -1053,6 +1052,9 @@ do {                                                                         \
                 /* k_pace: update last departure time (substract last add)*/ \
                 /* todo: last add may not be full ipg */                     \
                 flows_prev_dep_time[flow_id] = dep_time-ipg_ticks;           \
+                                                                             \
+                /* In dequeue, we will incr TX_R for this last packet */     \
+                /*  because .lso is set to 2 (NFD_IN_ISSUED_DESC_LSO_RET) */ \
                                                                              \
                 /* Break out of loop processing LSO ring */                  \
                 break;                                                       \
