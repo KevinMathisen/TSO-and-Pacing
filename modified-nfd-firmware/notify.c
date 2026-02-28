@@ -455,6 +455,10 @@ do {                                                                        \
     __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }                  \
     __asm { alu[NFD_IN_SEQN_PTR, NFD_IN_SEQN_PTR, +, 1] }                   \
                                                                             \
+    /* Set interface/PCIe num for packet */                                 \
+    __asm { alu[raw0_buff, raw0_buff, AND, 0xFFFFFF3F] }                    \
+    __asm { alu[raw0_buff, raw0_buff, OR,  PCIE_ISL, <<6] }                 \
+                                                                            \
     batch_out.pkt##_pkt## = lm_pacing_queue[pq_lm_head];                    \
     batch_out.pkt##_pkt##.__raw[0] = raw0_buff;                             \
                                                                             \
@@ -536,10 +540,10 @@ dequeue_pacing_queue() {
         }
 
         /* If a packet was dequeued, and it is either not LSO or 
-            last LSO pacekt, save this */
+            last LSO packet, save this */
         if (qnum != 32 && (
-            lm_pacing_queue[pq_lm_head].lso == NFD_IN_ISSUED_DESC_LSO_NULL ||
-            lm_pacing_queue[pq_lm_head].lso == NFD_IN_ISSUED_DESC_LSO_RET )) 
+            lm_pacing_queue[pq_lm_head].intf == NFD_IN_ISSUED_DESC_LSO_NULL ||
+            lm_pacing_queue[pq_lm_head].intf == NFD_IN_ISSUED_DESC_LSO_RET )) 
         {
             incr_tx = 1;
         }
@@ -557,9 +561,9 @@ dequeue_pacing_queue() {
         if (!incr_tx) continue;
         
         /* If a packet was dequeued (and in case of TSO is last segment), 
-            we need to increment TX_R. If so, wait until qc_sig is available */
+            we need to increment TX_R and wait until qc_sig is available */
         local_qc_queue[q_num]++;
-        if (local_qc_queue[q_num] != 0) wait_for_any(&qc_sig);
+        wait_for_any(&qc_sig);
 
         /* After waiting for raised qc_sig, check if still need to incr TX_R 
             (as other threads may have done this work for us) */
@@ -786,7 +790,7 @@ do {                                                                    \
     wait_for_all(&wq_sig##_out);                                        \
                                                                         \
     /* Place desc in batch out, zero vlan field */                      \
-    batch_out.pkt##_out##.__raw[0] = pkt_desc_tmp.__raw[0];             \
+    batch_out.pkt##_out##.__raw[0] = lm_batch_in.__raw[0];              \
     batch_out.pkt##_out##.__raw[1] = (lm_batch_in.__raw[1]              \
                                             | notify_reset_state_gpr);  \
     batch_out.pkt##_out##.__raw[2] = lm_batch_in.__raw[2];              \
@@ -808,7 +812,7 @@ do {                                                                    \
     wait_for_all(&wq_sig##_out);                                        \
                                                                         \
     /* Place desc in batch out, zero vlan field */                      \
-    batch_out.pkt##_out##.__raw[0] = pkt_desc_tmp.__raw[0];             \
+    batch_out.pkt##_out##.__raw[0] = lso_pkt.desc.__raw[0];             \
     batch_out.pkt##_out##.__raw[1] = (lso_pkt.desc.__raw[1]             \
                                         |  notify_reset_state_gpr);     \
     batch_out.pkt##_out##.__raw[2] = lso_pkt.desc.__raw[2];             \
@@ -845,8 +849,6 @@ do {                                                                         \
     if (lm_batch_in.eop) {                                                   \
                                                                              \
         __critical_path();                                                   \
-        pkt_desc_tmp.is_nfd = lm_batch_in.eop;                               \
-        pkt_desc_tmp.offset = lm_batch_in.offset;                            \
                                                                              \
         /* ======= Enqueue packet ===================================== */   \
                                                                              \
@@ -892,7 +894,7 @@ do {                                                                         \
             if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;          \
                                                                              \
             /* Place packet in lm_pq at its dep time. Also zero vlan field */\
-            lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];      \
+            lm_pacing_queue[pq_index].__raw[0] = lm_batch_in.__raw[0];       \
             lm_pacing_queue[pq_index].__raw[1] = (lm_batch_in.__raw[1]       \
                                                 | notify_reset_state_gpr);   \
             lm_pacing_queue[pq_index].__raw[2] = lm_batch_in.__raw[2];       \
@@ -971,9 +973,6 @@ do {                                                                         \
             /* Check whether it should go to the app */                      \
             if (lso_pkt.desc.eop) {                                          \
                                                                              \
-                pkt_desc_tmp.is_nfd = lso_pkt.desc.eop;                      \
-                pkt_desc_tmp.offset = lso_pkt.desc.offset;                   \
-                                                                             \
                 /* ======= Enqueue packet ============================= */   \
                                                                              \
                 /* -------------- Get index ------------- */                 \
@@ -1018,7 +1017,7 @@ do {                                                                         \
                     if (pq_index >= PQ_LM_LENGTH) pq_index -= PQ_LM_LENGTH;  \
                                                                              \
                     /* Place packet in next available slot in pacing queue */  \
-                    lm_pacing_queue[pq_index].__raw[0] = pkt_desc_tmp.__raw[0];\
+                    lm_pacing_queue[pq_index].__raw[0] = lso_pkt.desc.__raw[0];\
                     lm_pacing_queue[pq_index].__raw[1] = (lso_pkt.desc.__raw[1]\
                                                 |  notify_reset_state_gpr);    \
                     lm_pacing_queue[pq_index].__raw[2] = lso_pkt.desc.__raw[2];\
@@ -1091,7 +1090,6 @@ _notify(__shared __gpr unsigned int *complete,
     unsigned int num_avail;
 
     __xread struct _issued_pkt_batch batch_in;
-    struct nfd_in_pkt_desc pkt_desc_tmp;
 
     __lmem struct nfd_in_issued_desc lm_batch_in;
 
@@ -1128,17 +1126,6 @@ _notify(__shared __gpr unsigned int *complete,
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
 
-        /* Batches have a least one packet, but n_batch may still be
-         * zero, meaning that the queue is down.  In this case, EOP for
-         * all the packets should also be zero, so that notify will
-         * essentially skip the batch.
-         */
-        n_batch = batch_in.pkt0.num_batch;
-
-        /* Interface and queue info are the same for all packets in batch */
-        pkt_desc_tmp.intf = PCIE_ISL;
-        pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
-
         for (i = 0; i < 8; i++) {
             /* Copy issued desc into LM */
             switch (i) {
@@ -1170,10 +1157,6 @@ _notify(__shared __gpr unsigned int *complete,
 
         /* This is the first message in the batch. */
         wait_msk = __signals(&msg_sig0);
-
-        /* Interface and queue info is the same for all packets in batch */
-        pkt_desc_tmp.intf = PCIE_ISL;
-        pkt_desc_tmp.q_num = batch_in.pkt0.q_num;
 
         for (;;) {
             /* Count the message and service it */
