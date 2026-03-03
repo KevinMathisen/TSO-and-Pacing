@@ -345,7 +345,7 @@ __shared __lmem uint32_t lm_bitmasks[LM_BITMASKS_LENGTH];
 __gpr uint32_t next_batch_out = 0;
 
 /* FlowID mapping to previous departure time */
-__shared __lmem uint64_t flows_prev_dep_time[32];
+__shared __lmem uint64_t flows_prev_dep_time[8];
 
 
 /* --------------------- k_pace utilies ------------------------------------ */
@@ -790,8 +790,8 @@ do {                                                                         \
     /* Read pacing rate + flow id from vlan field */                         \
     /* Use 12*ns->ticks, results in firmware inserting 4% smaller gaps*/     \
     vlan_field = lm_batch_in.vlan;                                           \
-    idt_ticks = (vlan_field & 0x07FF)*12; /* 250ns -> 20ns ticks */          \
-    flow_id = (vlan_field >> 11) & 0x001F;                                   \
+    idt_ticks = (vlan_field & 0x0FFF)*12; /* 250ns -> 20ns ticks */          \
+    flow_id = (vlan_field >> 12) & 0x000F;                                   \
                                                                              \
     /* Calculate departure time for packet */                                \
     /* Flow 0 has zeroed IDT, so will always have dep_time = curtime */      \
