@@ -790,14 +790,14 @@ do {                                                                         \
     /* Read pacing rate + flow id from vlan field */                         \
     /* Use 12*ns->ticks, results in firmware inserting 4% smaller gaps*/     \
     vlan_field = lm_batch_in.vlan;                                           \
-    ipg_ticks = (vlan_field & 0x07FF)*12; /* 250ns -> 20ns ticks */          \
+    idt_ticks = (vlan_field & 0x07FF)*12; /* 250ns -> 20ns ticks */          \
     flow_id = (vlan_field >> 11) & 0x001F;                                   \
                                                                              \
     /* Calculate departure time for packet */                                \
     /* Flow 0 has zeroed IDT, so will always have dep_time = curtime */      \
     /* In other words, flow 0 is sent with no delay */                       \
     curtime = get_current_time();                                            \
-    dep_time = flows_prev_dep_time[flow_id] + ipg_ticks;                     \
+    dep_time = flows_prev_dep_time[flow_id] + idt_ticks;                     \
     if ( dep_time <= curtime) dep_time = curtime;                            \
     /* ----------------------------------------------- */                    \
                                                                              \
@@ -948,11 +948,11 @@ do {                                                                         \
                 /*  and update departure time of next packet in tso chunk */ \
                 if (delta_slots > PQ_TRESH_FUTURE_SLOTS) {                   \
                     dep_time +=                                              \
-                        ipg_ticks - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);  \
+                        idt_ticks - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);  \
                     delta_slots = PQ_TRESH_FUTURE_SLOTS;                     \
                 } else {                                                     \
                     __critical_path();                                       \
-                    dep_time += ipg_ticks;                                   \
+                    dep_time += idt_ticks;                                   \
                 }                                                            \
                                                                              \
                 /* Find desired (CTM) slot to enqueue in relation to head */ \
@@ -1012,8 +1012,8 @@ do {                                                                         \
             /* if it is last LSO being read from ring */                     \
             if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) {            \
                 /* k_pace: update last departure time (substract last add)*/ \
-                /* todo: last add may not be full ipg */                     \
-                flows_prev_dep_time[flow_id] = dep_time-ipg_ticks;           \
+                /* todo: last add may not be full idt */                     \
+                flows_prev_dep_time[flow_id] = dep_time-idt_ticks;           \
                                                                              \
                 /* Break out of loop processing LSO ring */                  \
                 break;                                                       \
@@ -1057,7 +1057,7 @@ _notify(__shared __gpr unsigned int *complete,
 
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
-    uint32_t flow_id, ipg_ticks, pq_index, pq_d_index, delta_slots;
+    uint32_t flow_id, idt_ticks, pq_index, pq_d_index, delta_slots;
     uint64_t dep_time, curtime;
 
     unsigned int i;
