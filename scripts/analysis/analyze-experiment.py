@@ -422,6 +422,9 @@ def plot_ppb_cdf(label_a: str, t_a: np.ndarray, color_a: str,
     # (First Flow in Each Config)...
 
 
+# TODO: function for plotting delay distribution
+# maybe boxplot
+
 
 def write_plots(results_a: dict, results_b: dict):
     """
@@ -455,6 +458,10 @@ def write_plots(results_a: dict, results_b: dict):
         label_a, gaps_us_a, color_a, label_b, gaps_us_b, color_b,
         path=METRICS_DIR / f"{EXPERIMENT_NAME}_compare_firstflow_ipa_cdf.png",
     )
+
+    # TODO: also plot for all flows from each config
+    # (to look for inter flow bursts, and possible reduction in this)
+    # most interesting for lower speeds where we might spread more even
 
 # ----------------- CLI output ------------------------
 
