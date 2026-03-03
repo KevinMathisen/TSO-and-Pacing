@@ -744,20 +744,20 @@ static void nfp_net_tx_ring_stop(struct netdev_queue *nd_q,
 }
 
 /**
- * nfp_net_tx_non_tso_ipg() - Set up IPG for non-LSO Tx descriptors
+ * nfp_net_tx_non_tso_idt() - Set up IDT for non-LSO Tx descriptors
  * @txd: Pointer to HW TX descriptor
  * @skb: Pointer to SKB
  * @md_bytes: Prepend length
  *
- * Set up IPG for non-LSO Tx descriptor, do nothing for LSO skbs.
+ * Set up IDT for non-LSO Tx descriptor, do nothing for LSO skbs.
  */
-static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
+static void nfp_net_tx_non_tso_idt(struct nfp_net_tx_desc *txd,
 				struct sk_buff *skb, u32 md_bytes) 
 {	
 	struct sock *sk;
 	unsigned long pacing_rate;
 	u32 packet_size;
-	u64 ipg_250ns, max_ipg_250ns;
+	u64 idt_250ns, max_idt_250ns;
 	
 	if (skb_is_gso(skb))
 		return;
@@ -767,20 +767,23 @@ static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
 
 	packet_size = skb->len - md_bytes;
 
-	ipg_250ns = 0;
+	idt_250ns = 0;
 
+	/* Convert pacing rate to inter-departure time in 250ns increments */
 	if (pacing_rate && pacing_rate != ~0UL)
-			ipg_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
+			idt_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
 													(u64)pacing_rate );
 
-	max_ipg_250ns = 4000ULL;
-	if (ipg_250ns > max_ipg_250ns) 
-		ipg_250ns = max_ipg_250ns;
-		
-	if (ipg_250ns > 0xFFF)
-	 	ipg_250ns = 0xFFF;
+	/* Cap idt to 0.5 ms */
+	max_idt_250ns = 2000ULL;
+	if (idt_250ns > max_idt_250ns) 
+		idt_250ns = max_idt_250ns;
 	
-	txd->vlan = cpu_to_le16((u16)ipg_250ns);
+	/* Cap idt to 11 bits */
+	if (idt_250ns > 0x7FF)
+	 	idt_250ns = 0x7FF;
+	
+	txd->vlan = cpu_to_le16((u16)idt_250ns);
 
 }
 
@@ -828,68 +831,67 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 	*/
 
 	/*
-	-------------- K: pacing modifications ----------------
+	-------------- Pacing modifications ----------------
 
 	Instead of setting l3/l4 offset, we use the whole field 
 		(vlan/l3+l4_offset) to set the pacing rate.
 
 	Firmware:
 		Does not use l3/l4 offset values
-		Interprets vlan field as IPG in 250ns ticks
-		(If later use time wheel, can set IPG in time wheel slots)
+		Interprets vlan field as IDT in 250ns ticks
 
-	Convert sk_pacing_rate (B/s) -> IPG in 250ns (12 bits -> 250ns - 1.024ms)
+	Convert sk_pacing_rate (B/s) -> IDT in 250ns (11 bits -> 250 ns - 0.512 ms)
 	*/
 	{
 		struct sock *sk;
 		unsigned long pacing_rate;
 		u32 packet_size;
-		u64 ipg_250ns, max_ipg_250ns;
+		u64 idt_250ns, max_idt_250ns;
 
 		sk = skb->sk;
 		pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;		
 
 		packet_size = (u32)mss + (hdrlen - md_bytes);
 		
-		ipg_250ns = 0;			// If pacing rate is 0 -> IPG is 0
+		idt_250ns = 0;			// If pacing rate is 0 -> IDT is 0
 
 		/* If pacing rate is not 0, 
-			calculate IPG (in 250ns ticks) for packets in burst 
-			( IPG = packet_size / bytes_per_second * 4*10^6 ) */
+			calculate IDT (in 250ns ticks) for *packets* in TSO super-packet 
+			( IDT = packet_size / bytes_per_second * 4*10^6 ) */
 		if (pacing_rate && pacing_rate != ~0UL)
-			ipg_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
+			idt_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
 													(u64)pacing_rate );
 		
-		/* Need a max ipg to not wrap queue in firmware
-			(total IPG for burst should not exceed 1ms) */
+		/* Need a max idt to not wrap queue in firmware
+		   Total IDT for burst should not exceed 1ms
+			(TSO has >= 2 pkt, so effectively cap idt to <= 0.5 ms) */
 		if (txbuf->pkt_cnt) {
-			max_ipg_250ns = DIV_ROUND_UP(4000ULL, txbuf->pkt_cnt);
-			if (ipg_250ns > max_ipg_250ns) 
-				ipg_250ns = max_ipg_250ns;
+			max_idt_250ns = DIV_ROUND_UP(4000ULL, txbuf->pkt_cnt);
+			if (idt_250ns > max_idt_250ns) 
+				idt_250ns = max_idt_250ns;
 		}
 		
-		// clamp to 12 bits
-		if (ipg_250ns > 0xFFF)
-			ipg_250ns = 0xFFF;
+		/* Clamp to 11 bits */
+		if (idt_250ns > 0x7FF)
+			idt_250ns = 0x7FF;
 		
 		/* 16 bit Vlan field: 
-		15      12 11               0
-		+---------+-----------------+
-		| FLOW_ID | PACING_RATE     |
-		+---------+-----------------+
-			4 bits     12 bits
+		15       11 10              0
+		+----------+----------------+
+		| FLOW_ID  |  PACING_RATE   |
+		+----------+----------------+
+		   5 bits       11 bits
 		*/
-		txd->vlan = cpu_to_le16((u16)ipg_250ns);
+		txd->vlan = cpu_to_le16((u16)idt_250ns);
 
 		/* Print stats from 100th to 140th call */
-		if (this_cpu_read(printk_call_counter) < 140) {
-			this_cpu_inc(printk_call_counter);
+		// if (this_cpu_read(printk_call_counter) < 140) {
+		// 	this_cpu_inc(printk_call_counter);
 
-			if (this_cpu_read(printk_call_counter) >= 100)
-				printk(KERN_DEBUG "Kevin tso stats: pkt_cnt=%u, skb_len=%u, pacing_rate=%lu, packet_size=%u\n", 
-											txbuf->pkt_cnt, skb->len, pacing_rate, packet_size);
-		}	
-		
+		// 	if (this_cpu_read(printk_call_counter) >= 100)
+		// 		printk(KERN_DEBUG "Kevin tso stats: pkt_cnt=%u, skb_len=%u, pacing_rate=%lu, packet_size=%u\n", 
+		// 									txbuf->pkt_cnt, skb->len, pacing_rate, packet_size);
+		// }	
 	}
 
 	txd->lso_hdrlen = hdrlen - md_bytes;
@@ -977,11 +979,16 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	/*
 	Hash to flow ID mapping:
 
-		last_flowid_idx				this maps to flowID 3
+		last_flowid_idx				this maps to flowID 4 (index 3 + 1)
 			|								|
 		+----------+-------+---------+----------+-----+
 		| hash 4   |   -   | hash 1  | hash 2	| ... |
 		+----------+-------+---------+----------+-----+
+		 0    |     1        2         3             30      
+		      |
+		maps to flowID 1 (as 0 is reserved for no pacing)
+
+	We have 5 bits, so 32-1 = 31 concurrent flows
 	*/
 
 	u32 flow_hash;
@@ -991,32 +998,39 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	flow_hash = skb_get_hash(skb);
 	if (!flow_hash) return;
 
-	flowId = 15;
+	/* No IDT set -> don't pace this flow (leave flowID as 0) */
+	vlan_field = le16_to_cpu(txd->vlan);
+	if (!vlan_field) return;
+
+	flowId = 0;
 	/* Check if hash is in mapping. If so use flow ID (index) here */
-	for (i = 0; i < 8; i++) {
+	for (i = 0; i < 31; i++) {
+
+		/* NB: check if this linear probe has performance hit for ~30 flows */
 		if (READ_ONCE(hash_to_flowid[i]) == flow_hash) {
-			flowId = i;
+			flowId = i+1;
 			break;
 		}
 	}
 
 	/* If no mapping, we overwrite last/oldest flows mapping. */
-	if (flowId == 15) {
-		unsigned int idx = (READ_ONCE(last_flowid_idx)+1)&7;
+	if (!flowId) {
+		unsigned int idx = READ_ONCE(last_flowid_idx)+1;
+		if (idx == 31) idx = 0;
+
 		WRITE_ONCE(hash_to_flowid[idx], flow_hash);
 		WRITE_ONCE(last_flowid_idx, idx);
 		flowId = idx;
 	}
 
 	/* 16 bit Vlan field: 
-	  15      12 11               0
-	  +---------+-----------------+
-	  | FLOW_ID | PACING_RATE     |
-	  +---------+-----------------+
-	    4 bits     12 bits
+	15       11 10              0
+	+----------+----------------+
+	| FLOW_ID  |  PACING_RATE   |
+	+----------+----------------+
+		5 bits       11 bits
 	*/
-	vlan_field = le16_to_cpu(txd->vlan);
-	vlan_field |= ((flowId & 0xF) << 12);
+	vlan_field |= ((flowId & 0x1F) << 11);
 	txd->vlan = cpu_to_le16(vlan_field);
 }
 
@@ -1253,7 +1267,7 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	txd->lso_hdrlen = 0;
 
 	/* Do not reorder - tso may adjust pkt cnt, flow id may overwrite vlan field */
-	nfp_net_tx_non_tso_ipg(txd, skb, md_bytes);
+	nfp_net_tx_non_tso_idt(txd, skb, md_bytes);
 	nfp_net_tx_tso(r_vec, txbuf, txd, skb, md_bytes);
 	nfp_net_tx_csum(dp, r_vec, txbuf, txd, skb);
 	nfp_net_tx_set_flow_id(txd, skb);
