@@ -65,8 +65,8 @@
 
 /* K: pacing modifications
    Store print call counter for each CPU */
-static DEFINE_PER_CPU(u32, printk_call_counter);
-static u32 hash_to_flowid[8];
+// static DEFINE_PER_CPU(u32, printk_call_counter);
+static u32 hash_to_flowid[31];
 static u32 last_flowid_idx;
 
 /**
