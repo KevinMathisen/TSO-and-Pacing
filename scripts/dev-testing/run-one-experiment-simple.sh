@@ -51,7 +51,7 @@ setup_server() {
     fq_codel) qdisc_flag="--fq-codel" ;;
   esac
 
-  "$SCRIPT_PATH"/setup-server-experiment "$tso_flag" "$mode_flag" "$qdisc_flag"
+  "$SCRIPT_PATH"/setup-server-experiment.sh "$tso_flag" "$mode_flag" "$qdisc_flag"
 }
 
 setup_client() {
@@ -63,7 +63,7 @@ setup_client() {
     datacenter-hc) mode_flag="--datacenter-hc" ;;
   esac
 
-  ssh -o BatchMode=yes "$CLIENT_SSH" "sudo $SCRIPT_PATH/setup-client-experiment $mode_flag"
+  ssh -o BatchMode=yes "$CLIENT_SSH" "sudo $SCRIPT_PATH/setup-client-experiment.sh $mode_flag"
   # ensure no running iperf3
   ssh "$CLIENT_SSH" "sudo pkill -f 'iperf3 -s'" 2>/dev/null || true
 }
