@@ -9,8 +9,8 @@ fi
 
 IP_IF="10.111.0.1"
 IP_ATTACHED="10.111.0.3"
-# IP_IF="192.168.50.1"
-# IP_ATTACHED="192.168.50.2"
+# IP_IF="10.0.1.1"
+# IP_ATTACHED="10.0.1.2"
 
 FW_TREE="$HOME/master/modified-nfp-firmware"
 DRV_TREE="$HOME/master/modified-nfp-oot-driver-2019"
@@ -159,6 +159,12 @@ if [ "$SKIP_CHECK" = false ]; then
   echo "==== offloads (expect TSO on) ===="
   ethtool -K enp2s0np0 tso on gso on
   ethtool -k "$NFP_IF" | egrep 'tcp-segmentation-offload'
+
+  # set correct ip for interface
+  ip addr flush dev "$NFP_IF"
+  ip link set "$NFP_IF" down
+  ip link set "$NFP_IF" up
+  ip addr add "$IP_IF/24" dev "$NFP_IF"
 
   echo ""
   echo "==== IP address of Netronome interface (should be $IP_IF) ===="
