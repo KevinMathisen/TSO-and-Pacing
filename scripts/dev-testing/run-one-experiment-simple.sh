@@ -94,7 +94,7 @@ CLIENT_DEV="enp1s0np0"
 USER="kevinm"
 CLIENT_SSH="$USER@$CLIENT_IP"
 
-SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts"
+SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 
 DUR=5   # seconds to run
 START_CAPTURE=2 # second to start capture
