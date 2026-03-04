@@ -35,9 +35,9 @@ done
 
 # ======= Load driver/firmware =======
 if [ "$TREATMENT" = 3 ]; then
-    ./build-nfp.sh 
+    "$HOME/master/TSO-and-Pacing/scripts/build-nfp.sh" 
 else
-    ./build-nfp.sh --org
+    "$HOME/master/TSO-and-Pacing/scripts/build-nfp.sh" --org
 fi
 
 # ======= Configure machine =======
