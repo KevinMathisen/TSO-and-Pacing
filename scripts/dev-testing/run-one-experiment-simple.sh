@@ -134,8 +134,8 @@ done
 [[ -n "$QDISC" ]] || { echo "Must specify qdisc"; exit 1; }
 
 
-TS="$(date +%Y%m%d_%H%M%S)"
-RUN_NAME="${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run${RUN_NUM}_${TS}"
+TS="$(date +%Y%m%d_%H%M)"
+RUN_NAME="${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run_${RUN_NUM}________${TS}"
 OUT_DIR="./runs/$RUN_NAME"
 mkdir -p "$OUT_DIR"
 
@@ -200,7 +200,7 @@ echo ""
 echo "Starting pcap on CLIENT"
 CAPTURE_OUT="capture_${RUN_NAME}.pcapng"
 
-ssh "$CLIENT_SSH" "sudo dumpcap -q -i $CLIENT_DEV -w /dev/shm/$CAPTURE_OUT -f \"$CAPTURE_FILTER\" -s 160 -B 256 -a duration:1 > /tmp/dumpcap_${RUN_NAME}.log 2>&1"
+ssh "$CLIENT_SSH" "sudo dumpcap -q -i $CLIENT_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 160 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
 
 # Wait until everything done
 wait "$SERVER_IPERF_PID"
@@ -213,6 +213,7 @@ CLIENT_IPERF_PID=""
 
 # capture done, retrieve output (wait until iperf done)
 echo "Copying "
+ssh "$CLIENT_SSH" "sudo chown $USER:$USER /dev/shm/$CAPTURE_OUT /tmp/dumpcap_${RUN_NAME}.log"
 scp "$CLIENT_SSH:/dev/shm/$CAPTURE_OUT" "$OUT_DIR/$CAPTURE_OUT"
 scp "$CLIENT_SSH:/tmp/dumpcap_${RUN_NAME}.log" "$OUT_DIR/dumpcap_${RUN_NAME}.log" || true
 
