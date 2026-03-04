@@ -196,6 +196,9 @@ echo "Starting iperf3 server on CLIENT"
 CLIENT_IPERF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'nohup iperf3 -s -p $IPERF_PORT > /tmp/iperf_server_${RUN_NAME}.log 2>&1 & echo \$!'")"
 echo "Client iperf3 server pid: $CLIENT_IPERF_PID"
 
+# TODO: maybe also probe fq_codel queue length and save this.
+
+
 sleep 0.5
 
 echo ""
