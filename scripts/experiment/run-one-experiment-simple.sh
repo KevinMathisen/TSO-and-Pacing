@@ -96,8 +96,8 @@ CLIENT_SSH="$USER@$CLIENT_IP"
 
 SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 
-DUR=5   # seconds to run
-START_CAPTURE=2 # second to start capture
+DUR=8   # seconds to run
+START_CAPTURE=5 # second to start capture
 IPERF_PORT=5201
 CAPTURE_FILTER="tcp and src host $SERVER_IP and dst host $CLIENT_IP and dst port $IPERF_PORT"
 
