@@ -6,7 +6,7 @@ if (( EUID != 0 )); then
   exit 1
 fi
 
-DEV="enp2s0np0"
+DEV="enp1s0np0"
 CONNECTION_MODE="direct-link"  # direct-link, internet, datacenter, or datacenter-high-contention 
 
 for arg in "$@"; do

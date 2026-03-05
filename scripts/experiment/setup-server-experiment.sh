@@ -34,11 +34,7 @@ for arg in "$@"; do
 done
 
 # ======= Load driver/firmware =======
-if [ "$TREATMENT" = 3 ]; then
-    "$HOME/master/TSO-and-Pacing/scripts/build-nfp.sh" 
-else
-    "$HOME/master/TSO-and-Pacing/scripts/build-nfp.sh" --org
-fi
+# NB: assume correct driver/firmware already loaded
 
 # ======= Configure machine =======
 cpufreq-set -g performance
@@ -60,14 +56,11 @@ tc qdisc replace dev "$DEV" root "$QDISC"
 
 if [ "$CONNECTION_MODE" = "internet" ]; then 
     echo "Configured for Internet (cubic)"
-    echo "You can now start test with './run-experiment.sh --internet --<experiment-name>' "
 
 elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-high-contention" ]]; then
     echo "Configured for Datacenter (dctcp + ecn)"
-    echo "You can now start test with './run-experiment.sh --datacenter --<experiment-name>' "
 
 else 
     echo "Configured for Direct-link (cubic)"
-    echo "You can now start test with './run-experiment.sh --direct-link --<experiment-name>' "
 
 fi
