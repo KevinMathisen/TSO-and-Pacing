@@ -50,17 +50,13 @@ if [ "$CONNECTION_MODE" = "internet" ]; then
     # egress 50 ms delay
     tc qdisc replace dev $DEV root netem delay 50ms limit 5000
 
-    # ---- ingress 1 Gbps ---- 
-    RATE=1gbit
+    # ---- ingress 2 Gbps ---- 
 
-    # HTB
-    tc qdisc replace dev ifb0 root handle 1: htb default 10
-    tc class replace dev ifb0 parent 1: classid 1:1  htb rate $RATE ceil $RATE
-    tc class replace dev ifb0 parent 1:1 classid 1:10 htb rate $RATE ceil $RATE
-
-    # Leaf fq_codel
-    tc qdisc replace dev ifb0 parent 1:10 handle 10: fq_codel \
-      noecn target 5ms interval 50ms memory_limit 16mb
+    # 500 Mbps per flow -> 2 Gbps total
+    # Max 10000 pkts -> 10000*1500 B = 15 MB buffer
+    tc qdisc replace dev ifb0 root fq \
+      maxrate 500mbit \
+      limit 10000 flow_limit 4000
 
     echo "Interface $DEV configured with Internet (50 ms RTT, 1 Gbps)"
 
@@ -69,19 +65,18 @@ elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-hi
     # ...
 
     # ---- ingress 4 Gbps ----
-    RATE=4gbit
 
-    tc qdisc replace dev ifb0 root handle 1: htb default 10
-    tc class replace dev ifb0 parent 1: classid 1:1  htb rate $RATE ceil $RATE
-    tc class replace dev ifb0 parent 1:1 classid 1:10 htb rate $RATE ceil $RATE
-
-    # Leaf fq_codel (shallow ecn marking)
-    tc qdisc replace dev ifb0 parent 1:10 handle 10: fq_codel \
-      ecn target 2ms interval 20ms ce_threshold 200us memory_limit 4mb
+    # 1 Gbps per flow -> 4 Gbps total
+    # Max 3000 pkts -> 3000*1500 B = 4.5 MB buffer
+    tc qdisc replace dev ifb0 root fq \
+      maxrate 1gbit ce_threshold 90us \
+      limit 3000 flow_limit 4000
 
     if [ "$CONNECTION_MODE" = "datacenter-high-contention" ]; then
-      tc qdisc replace dev ifb0 parent 1:10 handle 10: fq_codel \
-        ecn target 2ms interval 20ms ce_threshold 200us memory_limit 200kb
+      # Max 200 pkts -> 200*1500 B = 300 kB buffer
+      tc qdisc replace dev ifb0 root fq \
+        maxrate 1gbit ce_threshold 90us \
+        limit 200 flow_limit 4000
     fi
 
     sysctl -w net.ipv4.tcp_congestion_control=dctcp
