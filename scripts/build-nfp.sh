@@ -77,8 +77,8 @@ if [ "$SKIP_FW" = false ]; then
     else
       modprobe nfp
     fi
+    update-initramfs -u 2>/dev/null
   fi
-  update-initramfs -u 2>/dev/null
 
 else
   echo "== Skipping firmware build/install =="
