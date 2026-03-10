@@ -228,37 +228,29 @@ __shared __gpr uint32_t d_counter = 0;
     }                                                                          \
  } while(0)
 
-/* Count bits set in a 32-bit value (popcount) */
-#define _POPCOUNT32(_v, _cnt_out) do {                                          \
-    uint32_t __v = (uint32_t)(_v);                                              \
-    uint32_t __c = 0;                                                          \
-    while (__v) {                                                              \
-        __c += (__v & 1u);                                                     \
-        __v >>= 1;                                                            \
-    }                                                                          \
-    (_cnt_out) = __c;                                                          \
-} while (0)
-
 /*
- * Count how many slots are occupied in the CTM and LMEM pacing queues
+ * Count occupied slots in CTM and LMEM queues
  */
 #define DEBUG2() do {                                                           \
     if (debug_index < 200) {                                                    \
+        uint32_t __i;                                                           \
         uint32_t __total = 0;                                                   \
         uint32_t __total2 = 0;                                                  \
-        uint32_t __i;                                                           \
         wait_for_all(&wq_sig7);                                                 \
         for (__i = 0; __i < PQ_BITMASKS_LENGTH; __i++) {                        \
-            uint32_t __pc;                                                      \
-            _POPCOUNT32(bitmasks[__i], __pc);                                   \
-            __total += __pc;                                                    \
+            uint32_t __b = bitmasks[__i];                                       \
+            while (__b) {                                                       \
+                __total += (__b & 1u);                                          \
+                __b >>= 1;                                                      \
+            }                                                                   \
         }                                                                       \
         for (__i = 0; __i < LM_BITMASKS_LENGTH; __i++) {                        \
-            uint32_t __pc;                                                      \
-            _POPCOUNT32(lm_bitmasks[__i], __pc);                                \
-            __total2 += __pc;                                                   \
+            uint32_t __b = lm_bitmasks[__i];                                    \
+            while (__b) {                                                       \
+                __total2 += (__b & 1u);                                         \
+                __b >>= 1;                                                      \
+            }                                                                   \
         }                                                                       \
-        if (pq_ctm_head == 0) __total++;                                        \
         __total |= __total2 << 16;                                              \
                                                                                 \
         batch_out.pkt7.__raw[0] = __total;                                      \
@@ -267,28 +259,6 @@ __shared __gpr uint32_t d_counter = 0;
                                                     4, 4, sig_done, &wq_sig7);  \
     }                                                                           \
 } while (0)
-
-#define DEBUG3() do {                                                         \
-    d_counter++;                                                               \
-    if ((d_counter & 0x00FFFFFF) == 0 && (debug_index < 1024)) {               \
-        wait_for_all(&wq_sig6, &wq_sig7);                                      \
-                                                                               \
-        batch_out.pkt6.__raw[0] = (uint32_t)(flows_prev_dep_time[0] >> 24);    \
-        batch_out.pkt6.__raw[1] = (uint32_t)(flows_prev_dep_time[1] >> 24);    \
-        batch_out.pkt6.__raw[2] = (uint32_t)(flows_prev_dep_time[2] >> 24);    \
-        batch_out.pkt6.__raw[3] = (uint32_t)(flows_prev_dep_time[3] >> 24);    \
-        batch_out.pkt7.__raw[0] = (uint32_t)(flows_prev_dep_time[4] >> 24);    \
-        batch_out.pkt7.__raw[1] = (uint32_t)(flows_prev_dep_time[5] >> 24);    \
-        batch_out.pkt7.__raw[2] = (uint32_t)(flows_prev_dep_time[6] >> 24);    \
-        batch_out.pkt7.__raw[3] = (uint32_t)(flows_prev_dep_time[7] >> 24);    \
-        __mem_write32(&batch_out.pkt6, wire_debug + 4,                         \
-                                                16, 16, sig_done, &wq_sig7);   \
-        __mem_write32(&batch_out.pkt7, wire_debug + 8,                         \
-                                                16, 16, sig_done, &wq_sig7);   \
-    }                                                                          \
- } while(0)
-
-
 
 
 /* ===================== Pacing Queue and its variables ==================== */
