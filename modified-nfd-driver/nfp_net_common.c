@@ -881,13 +881,13 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 		*/
 		txd->vlan = cpu_to_le16((u16)idt_250ns);
 
-		/* Print stats from 100th to 140th call */
-		// if (this_cpu_read(printk_call_counter) < 140) {
+		/* Print stats from 100th to 200th call */
+		// if (this_cpu_read(printk_call_counter) < 200) {
 		// 	this_cpu_inc(printk_call_counter);
 
 		// 	if (this_cpu_read(printk_call_counter) >= 100)
-		// 		printk(KERN_DEBUG "Kevin tso stats: pkt_cnt=%u, skb_len=%u, pacing_rate=%lu, packet_size=%u\n", 
-		// 									txbuf->pkt_cnt, skb->len, pacing_rate, packet_size);
+		// 		printk(KERN_DEBUG "Kevin tso stats: pkt_cnt=%u, skb_len=%u, pacing_rate=%lu, packet_size=%u, idt=%u\n", 
+		// 									txbuf->pkt_cnt, skb->len, pacing_rate, packet_size, idt_250ns);
 		// }	
 	}
 
