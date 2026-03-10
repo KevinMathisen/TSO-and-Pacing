@@ -101,9 +101,7 @@ static __gpr unsigned int lso_ring_num;
 static SIGNAL wq_sig0, wq_sig1, wq_sig2, wq_sig3;
 static SIGNAL wq_sig4, wq_sig5, wq_sig6, wq_sig7;
 static SIGNAL msg_sig0, msg_sig1, qc_sig;
-static SIGNAL get_order_sig;    /* Signal for reordering before issuing get */
 static SIGNAL_MASK wait_msk;
-static unsigned int next_ctx;
 
 __xwrite struct _pkt_desc_batch batch_out;
 
@@ -691,10 +689,6 @@ notify_setup_shared()
     wq_raddr = (unsigned long long) NFD_EMEM_LINK(PCIE_ISL) >> 8;
 #endif
 
-    /* Kick off ordering */
-    reorder_start(NFD_IN_NOTIFY_MANAGER0, &get_order_sig);
-    reorder_start(NFD_IN_NOTIFY_MANAGER1, &get_order_sig);
-
     /* Initialize head timer, and align it to slots */
     pq_head_time = get_current_time() & ~((uint64_t)PQ_SLOT_TICKS - 1ull);
 }
@@ -708,8 +702,6 @@ notify_setup(int side)
 {
     dst_q = wq_num_base;
     wait_msk = __signals(&msg_sig0, &msg_sig1);
-
-    next_ctx = reorder_get_next_ctx_off(ctx(), NFD_IN_NOTIFY_STRIDE);
 
     if (side == 0) {
         lso_ring_num = NFD_RING_LINK(PCIE_ISL, nfd_in_issued_lso,
@@ -1024,9 +1016,8 @@ do {                                                                         \
 
 __intrinsic void
 sync_dequeue_loop() {
-    /* Participate in ctm_ring_get ordering */
-    wait_for_all(&get_order_sig);
-    reorder_done_opt(&next_ctx, &get_order_sig);
+    /* Give other threads chance to run */
+    ctx_swap();
 
     sync_ctm_lm();
     dequeue_pacing_queue();
@@ -1062,9 +1053,8 @@ _notify(__shared __gpr unsigned int *complete,
 
     unsigned int i;
 
-    /* Reorder before potentially issuing a ring get */
-    wait_for_all(&get_order_sig);
-    reorder_done_opt(&next_ctx, &get_order_sig);
+    /* Give other threads chance to run */
+    ctx_swap();
 
     /* There is a FULL batch to process */
     num_avail = *complete - *served;
@@ -1084,8 +1074,7 @@ _notify(__shared __gpr unsigned int *complete,
             alu[*served, *served, +, NFD_IN_MAX_BATCH_SZ];
         }
 
-        wait_msk = __signals(&qc_sig, &msg_sig0, &msg_sig1);
-        __implicit_read(&qc_sig);
+        wait_msk = __signals(&msg_sig0, &msg_sig1);
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
 
@@ -1119,6 +1108,9 @@ _notify(__shared __gpr unsigned int *complete,
          * for that queue by n_batch */
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
+
+        wait_for_all(&qc_sig);
+        
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
                             NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
 
@@ -1133,7 +1125,6 @@ _notify(__shared __gpr unsigned int *complete,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
         wait_sig_mask(wait_msk);
-        __implicit_read(&qc_sig);
         __implicit_read(&msg_sig0);
 
 
@@ -1186,11 +1177,13 @@ _notify(__shared __gpr unsigned int *complete,
         __implicit_read(&msg_sig0);
 
         /* Set up wait_msk to process a full batch next */
-        wait_msk = __signals(&msg_sig0, &msg_sig1, &qc_sig);
+        wait_msk = __signals(&msg_sig0, &msg_sig1);
 
         /* Process the final descriptor from the batch */
         lm_batch_in = batch_in.pkt0;
         _NOTIFY_PROC;
+
+        wait_for_all(&qc_sig);
 
         /* Increment the TX_R pointer for this queue by n_batch */
         __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
@@ -1225,9 +1218,8 @@ notify(int side)
 __intrinsic void
 notify_manager_reorder()
 {
-    /* Participate in ordering */
-    wait_for_all(&get_order_sig);
-    reorder_done_opt(&next_ctx, &get_order_sig);
+    /* Give other threads chance to run */
+    ctx_swap();
 }
 
 
