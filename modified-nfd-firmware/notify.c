@@ -213,7 +213,6 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 /* -------------------- k_pace: Debug -------------------------------------- */
 __export __emem uint32_t wire_debug[1024*1024];
 __shared __gpr uint32_t debug_index = 0;
-__shared __gpr uint32_t d_counter = 0;
 
 /*
  * Write a 32-bit words to EMEM for debugging, without swapping contexts.
@@ -335,15 +334,18 @@ raise_signal(SIGNAL *sig)
     __implicit_write(sig);
 }
 
-#define _BATCH_IN_TO_LM(_pkt)                                               \
-do {                                                                        \
-    lm_index = old_pq_lm_sync_end+_pkt;                                     \
-                                                                            \
-    /* If we dont overwrite packet in lm, insert slot to lm */              \
-    if (!( (bitmask >> (lm_index & INDEX_IN_BITMASK_MASK)) & 1u )) {        \
-        lm_pacing_queue[lm_index] = batch_in.pkt##_pkt##;                   \
-    }                                                                       \
-                                                                            \
+#define _BATCH_IN_TO_LM(_pkt)                                                   \
+do {                                                                            \
+    lm_index = old_pq_lm_sync_end+_pkt;                                         \
+                                                                                \
+    /* If we dont overwrite packet in LMEM, insert slot to LMEM.             */ \
+    /* Note: Could check CTM bitmask if there is anything to insert to LMEM, */ \
+    /*       however this would be less effient at high loads                */ \
+    /* (adds an extra condtional which often evaluates to true at high loads)*/ \
+    if (!( (bitmask >> (lm_index & INDEX_IN_BITMASK_MASK)) & 1u )) {            \
+        lm_pacing_queue[lm_index] = batch_in.pkt##_pkt##;                       \
+    }                                                                           \
+                                                                                \
 } while (0)
 
 /**
@@ -361,15 +363,16 @@ sync_ctm_lm() {
     /* Need more than 8 slots to sync! */
     if (pq_lm_dequeue_cnt < 8) return;
 
-    // Save where we want to write to in lm
+    /* Save where we want to write to in lm */
     old_pq_lm_sync_end = pq_lm_sync_end;
 
-    // Issue read from CTM to batch_in
+    /* --- Issue read from CTM to batch_in --- */
+
     ctm_ptr = &ctm_pacing_queue[pq_ctm_sync_end];
     addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;
     addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);
 
-    // Read *8* x 64 bit (4 desc. -> 64B)
+    /* Each mem[read...] reads 8 * 64 bit (equal to 4 desc. / 64B) */
     __asm {
         mem[read, batch_in.pkt0, addr_hi, <<8, addr_lo, __ct_const_val(8)], \
                         sig_done[*msg_sig0];
@@ -380,7 +383,8 @@ sync_ctm_lm() {
                         sig_done[*msg_sig1];
     }
 
-    // Update pointers to "reserve" these 8 slots for us
+    /* Update pointers to "reserve" these 8 slots for us 
+        So after we yield no other thread will sync this */
     pq_lm_dequeue_cnt -= 8;
     pq_lm_sync_end += 8;
     if (pq_lm_sync_end >= PQ_LM_LENGTH) pq_lm_sync_end -= PQ_LM_LENGTH;
@@ -389,7 +393,8 @@ sync_ctm_lm() {
 
     wait_for_all(&msg_sig0, &msg_sig1);
 
-    // Place 8 slots in batch_in to LM
+    /* Read complete, try to place slots in LMEM window
+        (while ensuring we dont overwrite pkts written directly to LMEM) */
     bitmask = lm_bitmasks[old_pq_lm_sync_end >> INDEX_TO_BITMASK_SHIFT];
 
     _BATCH_IN_TO_LM(0);
@@ -407,7 +412,7 @@ sync_ctm_lm() {
 do {                                                                        \
     /* Clear signal (it is implied raised if this macro is called )*/       \
     /* (halt if not raised, as this indicates come corruption) */           \
-    if (!signal_test(&wq_sig##_pkt)) { DEBUG(0x0001); halt(); }             \
+    if (!signal_test(&wq_sig##_pkt)) { halt(); }                            \
                                                                             \
     raw0_buff = lm_pacing_queue[pq_lm_head].__raw[0];                       \
                                                                             \
@@ -488,7 +493,7 @@ dequeue_pacing_queue() {
             }
 
             next_batch_out++;
-            if (next_batch_out == 7) next_batch_out = 0;
+            next_batch_out &= 7;
 
             /* Zero bitmask for this slot (ctm and lm) */
             bitmasks[bitmask_index] &= ~(1u << index_in_bitmask);
@@ -537,7 +542,7 @@ pq_find_next_available_slot(uint32_t pq_d_index)
             return (bitmask_index << INDEX_TO_BITMASK_SHIFT) + index_in_bitmask;
         }
 
-        /* New bitmask to check */
+        /* No available spot in bitmask, so try next one */
         index_in_bitmask = 0;
         bitmask_index++;
         if (bitmask_index >= PQ_BITMASKS_LENGTH)
@@ -545,7 +550,7 @@ pq_find_next_available_slot(uint32_t pq_d_index)
     }
 
     /* No slot found within 620-660 slots of initial */
-    DEBUG(0x0002);
+    /* Should never happen, indicates corruption/invalid state */
     halt();
     return 0;
 }
@@ -749,29 +754,25 @@ do {                                                                    \
 
 #define _NOTIFY_PROC                                                         \
 do {                                                                         \
-    /* --------------k_pace -------------------------- */                    \
     /* Read pacing rate + flow id from vlan field */                         \
-    /* Use 12*ns->ticks, results in firmware inserting 4% smaller gaps*/     \
+    /* Use 12*ns->ticks, results in firmware inserting 4% smaller gaps */    \
     vlan_field = lm_batch_in.vlan;                                           \
     idt_ticks = (vlan_field & 0x0FFF)*12; /* 250ns -> 20ns ticks */          \
     flow_id = (vlan_field >> 12) & 0x000F;                                   \
                                                                              \
-    /* Calculate departure time for packet */                                \
-    /* Flow 0 has zeroed IDT, so will always have dep_time = curtime */      \
-    /* In other words, flow 0 is sent with no delay */                       \
-    curtime = get_current_time();                                            \
-    dep_time = flows_prev_dep_time[flow_id] + idt_ticks;                     \
-    if ( dep_time <= curtime) dep_time = curtime;                            \
-    /* ----------------------------------------------- */                    \
-                                                                             \
-    /* finished packet and no LSO */                                         \
-    if (lm_batch_in.eop) {                                                   \
+    if (lm_batch_in.eop) {  /* finished packet and no LSO */                 \
                                                                              \
         __critical_path();                                                   \
         pkt_desc_tmp.is_nfd = lm_batch_in.eop;                               \
         pkt_desc_tmp.offset = lm_batch_in.offset;                            \
                                                                              \
         /* ======= Enqueue packet ===================================== */   \
+                                                                             \
+        /* Calculate departure time for packet */                            \
+        /* If dep time has elapsed, we send packet as soon as possible */    \
+        curtime = get_current_time();                                        \
+        dep_time = flows_prev_dep_time[flow_id] + idt_ticks;                 \
+        if ( dep_time <= curtime) dep_time = curtime;                        \
                                                                              \
         /* -------------- Get index ------------- */                         \
         delta_slots = 0;                                                     \
@@ -899,6 +900,13 @@ do {                                                                         \
                                                                              \
                 /* ======= Enqueue packet ============================= */   \
                                                                              \
+                /* Calculate departure time for packet */                    \
+                /* Note: could be more efficient by not reading prev dep_t */\
+                /*       for each TSO segment, but incr. dep_time directly */\
+                curtime = get_current_time();                                \
+                dep_time = flows_prev_dep_time[flow_id] + idt_ticks;         \
+                if ( dep_time <= curtime) dep_time = curtime;                \
+                                                                             \
                 /* -------------- Get index ------------- */                 \
                 delta_slots = 0;                                             \
                                                                              \
@@ -908,14 +916,14 @@ do {                                                                         \
                                                     PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
                 /* Ensure packet is not enqueued to far in future */         \
-                /*  and update departure time of next packet in tso chunk */ \
+                /*  and update last departure time of flow  */               \
                 if (delta_slots > PQ_TRESH_FUTURE_SLOTS) {                   \
-                    dep_time +=                                              \
-                        idt_ticks - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);  \
+                    flows_prev_dep_time[flow_id] =                           \
+                        dep_time - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);   \
                     delta_slots = PQ_TRESH_FUTURE_SLOTS;                     \
                 } else {                                                     \
                     __critical_path();                                       \
-                    dep_time += idt_ticks;                                   \
+                    flows_prev_dep_time[flow_id] = dep_time;                 \
                 }                                                            \
                                                                              \
                 /* Find desired (CTM) slot to enqueue in relation to head */ \
@@ -972,15 +980,8 @@ do {                                                                         \
                                                                              \
             }                                                                \
                                                                              \
-            /* if it is last LSO being read from ring */                     \
-            if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) {            \
-                /* k_pace: update last departure time (substract last add)*/ \
-                /* todo: last add may not be full idt */                     \
-                flows_prev_dep_time[flow_id] = dep_time-idt_ticks;           \
-                                                                             \
-                /* Break out of loop processing LSO ring */                  \
-                break;                                                       \
-            }                                                                \
+            /* if last LSO from ring, break out of LSO loop */               \
+            if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) break;       \
         }                                                                    \
     }                                                                        \
 } while (0)
@@ -1049,11 +1050,6 @@ _notify(__shared __gpr unsigned int *complete,
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
 
-        /* Batches have a least one packet, but n_batch may still be
-         * zero, meaning that the queue is down.  In this case, EOP for
-         * all the packets should also be zero, so that notify will
-         * essentially skip the batch.
-         */
         n_batch = batch_in.pkt0.num_batch;
 
         /* Interface and queue info are the same for all packets in batch */
@@ -1091,7 +1087,6 @@ _notify(__shared __gpr unsigned int *complete,
 
         wait_msk &= ~__signals(&msg_sig1);
 
-        /* ctm_ring_get() uses sig_done */
         ctm_ring_get(NOTIFY_RING_ISL, input_ring, &batch_in.pkt0,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
@@ -1099,9 +1094,7 @@ _notify(__shared __gpr unsigned int *complete,
         __implicit_read(&msg_sig0);
 
 
-        /* This is the first message in the batch. Do not wait for
-         * signals that will not be set while processing a partial
-         * batch and store batch info. */
+        /* This is the first message in the batch. Set wait mask to msg_sig0 */
         n_batch = batch_in.pkt0.num_batch;
         qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
                                NFD_IN_TX_QUEUE);
@@ -1272,14 +1265,7 @@ main(void)
     notify_setup_visible();
 
     if (ctx() == 0) {
-        /*
-         * This function will start ordering for CTX0,
-         * the manager for loop 0
-         */
         notify_setup_shared();
-
-        /* NFD_INIT_DONE_SET(PCIE_ISL, 2);     /\* XXX Remove? *\/ */
-
     }
 
     /* Test which side the context is servicing */
