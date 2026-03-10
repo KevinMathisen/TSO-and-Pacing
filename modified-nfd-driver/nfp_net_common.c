@@ -744,20 +744,20 @@ static void nfp_net_tx_ring_stop(struct netdev_queue *nd_q,
 }
 
 /**
- * nfp_net_tx_non_tso_ipg() - Set up IPG for non-LSO Tx descriptors
+ * nfp_net_tx_non_tso_idt() - Set up IDT for non-LSO Tx descriptors
  * @txd: Pointer to HW TX descriptor
  * @skb: Pointer to SKB
  * @md_bytes: Prepend length
  *
- * Set up IPG for non-LSO Tx descriptor, do nothing for LSO skbs.
+ * Set up IDT for non-LSO Tx descriptor, do nothing for LSO skbs.
  */
-static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
+static void nfp_net_tx_non_tso_idt(struct nfp_net_tx_desc *txd,
 				struct sk_buff *skb, u32 md_bytes) 
 {	
 	struct sock *sk;
 	unsigned long pacing_rate;
 	u32 packet_size;
-	u64 ipg_250ns, max_ipg_250ns;
+	u64 idt_250ns, max_idt_250ns;
 	
 	if (skb_is_gso(skb))
 		return;
@@ -767,20 +767,20 @@ static void nfp_net_tx_non_tso_ipg(struct nfp_net_tx_desc *txd,
 
 	packet_size = skb->len - md_bytes;
 
-	ipg_250ns = 0;
+	idt_250ns = 0;
 
 	if (pacing_rate && pacing_rate != ~0UL)
-			ipg_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
+			idt_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
 													(u64)pacing_rate );
 
-	max_ipg_250ns = 4000ULL;
-	if (ipg_250ns > max_ipg_250ns) 
-		ipg_250ns = max_ipg_250ns;
+	max_idt_250ns = 4000ULL;
+	if (idt_250ns > max_idt_250ns) 
+		idt_250ns = max_idt_250ns;
 		
-	if (ipg_250ns > 0xFFF)
-	 	ipg_250ns = 0xFFF;
+	if (idt_250ns > 0xFFF)
+	 	idt_250ns = 0xFFF;
 	
-	txd->vlan = cpu_to_le16((u16)ipg_250ns);
+	txd->vlan = cpu_to_le16((u16)idt_250ns);
 
 }
 
@@ -835,42 +835,42 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 
 	Firmware:
 		Does not use l3/l4 offset values
-		Interprets vlan field as IPG in 250ns ticks
-		(If later use time wheel, can set IPG in time wheel slots)
+		Interprets vlan field as IDT in 250ns ticks
+		(If later use time wheel, can set IDT in time wheel slots)
 
-	Convert sk_pacing_rate (B/s) -> IPG in 250ns (12 bits -> 250ns - 1.024ms)
+	Convert sk_pacing_rate (B/s) -> IDT in 250ns (12 bits -> 250ns - 1.024ms)
 	*/
 	{
 		struct sock *sk;
 		unsigned long pacing_rate;
 		u32 packet_size;
-		u64 ipg_250ns, max_ipg_250ns;
+		u64 idt_250ns, max_idt_250ns;
 
 		sk = skb->sk;
 		pacing_rate = sk ? READ_ONCE(sk->sk_pacing_rate) : 0;		
 
 		packet_size = (u32)mss + (hdrlen - md_bytes);
 		
-		ipg_250ns = 0;			// If pacing rate is 0 -> IPG is 0
+		idt_250ns = 0;			// If pacing rate is 0 -> IDT is 0
 
 		/* If pacing rate is not 0, 
-			calculate IPG (in 250ns ticks) for packets in burst 
-			( IPG = packet_size / bytes_per_second * 4*10^6 ) */
+			calculate IDT (in 250ns ticks) for packets in burst 
+			( IDT = packet_size / bytes_per_second * 4*10^6 ) */
 		if (pacing_rate && pacing_rate != ~0UL)
-			ipg_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
+			idt_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
 													(u64)pacing_rate );
 		
-		/* Need a max ipg to not wrap queue in firmware
-			(total IPG for burst should not exceed 1ms) */
+		/* Need a max idt to not wrap queue in firmware
+			(total IDT for burst should not exceed 1ms) */
 		if (txbuf->pkt_cnt) {
-			max_ipg_250ns = DIV_ROUND_UP(4000ULL, txbuf->pkt_cnt);
-			if (ipg_250ns > max_ipg_250ns) 
-				ipg_250ns = max_ipg_250ns;
+			max_idt_250ns = DIV_ROUND_UP(4000ULL, txbuf->pkt_cnt);
+			if (idt_250ns > max_idt_250ns) 
+				idt_250ns = max_idt_250ns;
 		}
 		
 		// clamp to 12 bits
-		if (ipg_250ns > 0xFFF)
-			ipg_250ns = 0xFFF;
+		if (idt_250ns > 0xFFF)
+			idt_250ns = 0xFFF;
 		
 		/* 16 bit Vlan field: 
 		15      12 11               0
@@ -879,17 +879,16 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 		+---------+-----------------+
 			4 bits     12 bits
 		*/
-		txd->vlan = cpu_to_le16((u16)ipg_250ns);
+		txd->vlan = cpu_to_le16((u16)idt_250ns);
 
-		/* Print stats from 100th to 140th call */
-		if (this_cpu_read(printk_call_counter) < 140) {
-			this_cpu_inc(printk_call_counter);
+		/* Print stats from 100th to 200th call */
+		// if (this_cpu_read(printk_call_counter) < 200) {
+		// 	this_cpu_inc(printk_call_counter);
 
-			if (this_cpu_read(printk_call_counter) >= 100)
-				printk(KERN_DEBUG "Kevin tso stats: pkt_cnt=%u, skb_len=%u, pacing_rate=%lu, packet_size=%u\n", 
-											txbuf->pkt_cnt, skb->len, pacing_rate, packet_size);
-		}	
-		
+		// 	if (this_cpu_read(printk_call_counter) >= 100)
+		// 		printk(KERN_DEBUG "Kevin tso stats: pkt_cnt=%u, skb_len=%u, pacing_rate=%lu, packet_size=%u, idt=%u\n", 
+		// 									txbuf->pkt_cnt, skb->len, pacing_rate, packet_size, idt_250ns);
+		// }	
 	}
 
 	txd->lso_hdrlen = hdrlen - md_bytes;
@@ -1253,7 +1252,7 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	txd->lso_hdrlen = 0;
 
 	/* Do not reorder - tso may adjust pkt cnt, flow id may overwrite vlan field */
-	nfp_net_tx_non_tso_ipg(txd, skb, md_bytes);
+	nfp_net_tx_non_tso_idt(txd, skb, md_bytes);
 	nfp_net_tx_tso(r_vec, txbuf, txd, skb, md_bytes);
 	nfp_net_tx_csum(dp, r_vec, txbuf, txd, skb);
 	nfp_net_tx_set_flow_id(txd, skb);

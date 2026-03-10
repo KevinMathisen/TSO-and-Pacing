@@ -101,9 +101,7 @@ static __gpr unsigned int lso_ring_num;
 static SIGNAL wq_sig0, wq_sig1, wq_sig2, wq_sig3;
 static SIGNAL wq_sig4, wq_sig5, wq_sig6, wq_sig7;
 static SIGNAL msg_sig0, msg_sig1, qc_sig;
-static SIGNAL get_order_sig;    /* Signal for reordering before issuing get */
 static SIGNAL_MASK wait_msk;
-static unsigned int next_ctx;
 
 __xwrite struct _pkt_desc_batch batch_out;
 
@@ -198,7 +196,6 @@ static __shared __gpr unsigned int dst_q_seqn = 0;
 #else /* (NFD_IN_NUM_SEQRS == 1) */
 #define NFD_IN_SEQN_PTR *l$index3
 /* Add sequence numbers, using a LM to store */
-/* k_pace: NFD_IN_NUM_SEQRS is set to 8 on our machine! */
 static __shared __lmem unsigned int seq_nums[NFD_IN_NUM_SEQRS];
 #endif /* (NFD_IN_NUM_SEQRS == 1) */
 
@@ -216,7 +213,6 @@ __shared __gpr unsigned int notify_reset_state_gpr = 0;
 /* -------------------- k_pace: Debug -------------------------------------- */
 __export __emem uint32_t wire_debug[1024*1024];
 __shared __gpr uint32_t debug_index = 0;
-__shared __gpr uint32_t d_counter = 0;
 
 /*
  * Write a 32-bit words to EMEM for debugging, without swapping contexts.
@@ -231,37 +227,29 @@ __shared __gpr uint32_t d_counter = 0;
     }                                                                          \
  } while(0)
 
-/* Count bits set in a 32-bit value (popcount) */
-#define _POPCOUNT32(_v, _cnt_out) do {                                          \
-    uint32_t __v = (uint32_t)(_v);                                              \
-    uint32_t __c = 0;                                                          \
-    while (__v) {                                                              \
-        __c += (__v & 1u);                                                     \
-        __v >>= 1;                                                            \
-    }                                                                          \
-    (_cnt_out) = __c;                                                          \
-} while (0)
-
 /*
- * Count how many slots are occupied in the CTM and LMEM pacing queues
+ * Count occupied slots in CTM and LMEM queues
  */
 #define DEBUG2() do {                                                           \
     if (debug_index < 200) {                                                    \
+        uint32_t __i;                                                           \
         uint32_t __total = 0;                                                   \
         uint32_t __total2 = 0;                                                  \
-        uint32_t __i;                                                           \
         wait_for_all(&wq_sig7);                                                 \
         for (__i = 0; __i < PQ_BITMASKS_LENGTH; __i++) {                        \
-            uint32_t __pc;                                                      \
-            _POPCOUNT32(bitmasks[__i], __pc);                                   \
-            __total += __pc;                                                    \
+            uint32_t __b = bitmasks[__i];                                       \
+            while (__b) {                                                       \
+                __total += (__b & 1u);                                          \
+                __b >>= 1;                                                      \
+            }                                                                   \
         }                                                                       \
         for (__i = 0; __i < LM_BITMASKS_LENGTH; __i++) {                        \
-            uint32_t __pc;                                                      \
-            _POPCOUNT32(lm_bitmasks[__i], __pc);                                \
-            __total2 += __pc;                                                   \
+            uint32_t __b = lm_bitmasks[__i];                                    \
+            while (__b) {                                                       \
+                __total2 += (__b & 1u);                                         \
+                __b >>= 1;                                                      \
+            }                                                                   \
         }                                                                       \
-        if (pq_ctm_head == 0) __total++;                                        \
         __total |= __total2 << 16;                                              \
                                                                                 \
         batch_out.pkt7.__raw[0] = __total;                                      \
@@ -270,28 +258,6 @@ __shared __gpr uint32_t d_counter = 0;
                                                     4, 4, sig_done, &wq_sig7);  \
     }                                                                           \
 } while (0)
-
-#define DEBUG3() do {                                                         \
-    d_counter++;                                                               \
-    if ((d_counter & 0x00FFFFFF) == 0 && (debug_index < 1024)) {               \
-        wait_for_all(&wq_sig6, &wq_sig7);                                      \
-                                                                               \
-        batch_out.pkt6.__raw[0] = (uint32_t)(flows_prev_dep_time[0] >> 24);    \
-        batch_out.pkt6.__raw[1] = (uint32_t)(flows_prev_dep_time[1] >> 24);    \
-        batch_out.pkt6.__raw[2] = (uint32_t)(flows_prev_dep_time[2] >> 24);    \
-        batch_out.pkt6.__raw[3] = (uint32_t)(flows_prev_dep_time[3] >> 24);    \
-        batch_out.pkt7.__raw[0] = (uint32_t)(flows_prev_dep_time[4] >> 24);    \
-        batch_out.pkt7.__raw[1] = (uint32_t)(flows_prev_dep_time[5] >> 24);    \
-        batch_out.pkt7.__raw[2] = (uint32_t)(flows_prev_dep_time[6] >> 24);    \
-        batch_out.pkt7.__raw[3] = (uint32_t)(flows_prev_dep_time[7] >> 24);    \
-        __mem_write32(&batch_out.pkt6, wire_debug + 4,                         \
-                                                16, 16, sig_done, &wq_sig7);   \
-        __mem_write32(&batch_out.pkt7, wire_debug + 8,                         \
-                                                16, 16, sig_done, &wq_sig7);   \
-    }                                                                          \
- } while(0)
-
-
 
 
 /* ===================== Pacing Queue and its variables ==================== */
@@ -348,8 +314,6 @@ __gpr uint32_t next_batch_out = 0;
 /* FlowID mapping to previous departure time */
 __shared __lmem uint64_t flows_prev_dep_time[8];
 
-/* For counting queue increments (NFD_IN_NUM_SEQRS=8) */
-__shared __lmem uint32_t local_qc_queue[NFD_IN_NUM_SEQRS];
 
 /* --------------------- k_pace utilies ------------------------------------ */
 
@@ -370,15 +334,18 @@ raise_signal(SIGNAL *sig)
     __implicit_write(sig);
 }
 
-#define _BATCH_IN_TO_LM(_pkt)                                               \
-do {                                                                        \
-    lm_index = old_pq_lm_sync_end+_pkt;                                     \
-                                                                            \
-    /* If we dont overwrite packet in lm, insert slot to lm */              \
-    if (!( (bitmask >> (lm_index & INDEX_IN_BITMASK_MASK)) & 1u )) {        \
-        lm_pacing_queue[lm_index] = batch_in.pkt##_pkt##;                   \
-    }                                                                       \
-                                                                            \
+#define _BATCH_IN_TO_LM(_pkt)                                                   \
+do {                                                                            \
+    lm_index = old_pq_lm_sync_end+_pkt;                                         \
+                                                                                \
+    /* If we dont overwrite packet in LMEM, insert slot to LMEM.             */ \
+    /* Note: Could check CTM bitmask if there is anything to insert to LMEM, */ \
+    /*       however this would be less effient at high loads                */ \
+    /* (adds an extra condtional which often evaluates to true at high loads)*/ \
+    if (!( (bitmask >> (lm_index & INDEX_IN_BITMASK_MASK)) & 1u )) {            \
+        lm_pacing_queue[lm_index] = batch_in.pkt##_pkt##;                       \
+    }                                                                           \
+                                                                                \
 } while (0)
 
 /**
@@ -396,15 +363,16 @@ sync_ctm_lm() {
     /* Need more than 8 slots to sync! */
     if (pq_lm_dequeue_cnt < 8) return;
 
-    // Save where we want to write to in lm
+    /* Save where we want to write to in lm */
     old_pq_lm_sync_end = pq_lm_sync_end;
 
-    // Issue read from CTM to batch_in
+    /* --- Issue read from CTM to batch_in --- */
+
     ctm_ptr = &ctm_pacing_queue[pq_ctm_sync_end];
     addr_hi = ((unsigned long long)ctm_ptr >> 8) & 0xff000000;
     addr_lo = ((unsigned long long)ctm_ptr & 0xffffffff);
 
-    // Read *8* x 64 bit (4 desc. -> 64B)
+    /* Each mem[read...] reads 8 * 64 bit (equal to 4 desc. / 64B) */
     __asm {
         mem[read, batch_in.pkt0, addr_hi, <<8, addr_lo, __ct_const_val(8)], \
                         sig_done[*msg_sig0];
@@ -415,7 +383,8 @@ sync_ctm_lm() {
                         sig_done[*msg_sig1];
     }
 
-    // Update pointers to "reserve" these 8 slots for us
+    /* Update pointers to "reserve" these 8 slots for us 
+        So after we yield no other thread will sync this */
     pq_lm_dequeue_cnt -= 8;
     pq_lm_sync_end += 8;
     if (pq_lm_sync_end >= PQ_LM_LENGTH) pq_lm_sync_end -= PQ_LM_LENGTH;
@@ -424,7 +393,8 @@ sync_ctm_lm() {
 
     wait_for_all(&msg_sig0, &msg_sig1);
 
-    // Place 8 slots in batch_in to LM
+    /* Read complete, try to place slots in LMEM window
+        (while ensuring we dont overwrite pkts written directly to LMEM) */
     bitmask = lm_bitmasks[old_pq_lm_sync_end >> INDEX_TO_BITMASK_SHIFT];
 
     _BATCH_IN_TO_LM(0);
@@ -442,14 +412,13 @@ sync_ctm_lm() {
 do {                                                                        \
     /* Clear signal (it is implied raised if this macro is called )*/       \
     /* (halt if not raised, as this indicates come corruption) */           \
-    if (!signal_test(&wq_sig##_pkt)) { DEBUG(0x0001); halt(); }             \
+    if (!signal_test(&wq_sig##_pkt)) { halt(); }                            \
                                                                             \
     raw0_buff = lm_pacing_queue[pq_lm_head].__raw[0];                       \
-    q_num = NFD_IN_SEQR_NUM(raw0_buff);                                     \
                                                                             \
     /* Point csr addr 3 (seqn_ptr) to correct queue */                      \
     local_csr_write(local_csr_active_lm_addr_3,                             \
-        (uint32_t) &seq_nums[q_num]);                                       \
+        (uint32_t) &seq_nums[NFD_IN_SEQR_NUM(raw0_buff)]);                  \
                                                                             \
     /* Set seqn of packet, then increase counter */                         \
     __asm { ld_field[raw0_buff, 6, NFD_IN_SEQN_PTR, <<8] }                  \
@@ -472,7 +441,7 @@ __intrinsic void
 dequeue_pacing_queue() {
     __gpr uint32_t raw0_buff;
     uint64_t now;
-    uint32_t index_in_bitmask, bitmask_index, slots_to_send, q_num;
+    uint32_t index_in_bitmask, bitmask_index, slots_to_send;
     uint32_t out_msg_sz_2 = sizeof(struct nfd_in_pkt_desc);
 
     /* We are not done until we reach current time (slots_to_send == 0) */
@@ -505,7 +474,6 @@ dequeue_pacing_queue() {
         if (slots_to_send == 0) break;
 
         /* --- We are now checking slot pq_head points to */
-        q_num = 32;
 
         /* Calculate which bitmask to check */
         bitmask_index = pq_ctm_head >> INDEX_TO_BITMASK_SHIFT;
@@ -525,7 +493,7 @@ dequeue_pacing_queue() {
             }
 
             next_batch_out++;
-            if (next_batch_out == 7) next_batch_out = 0;
+            next_batch_out &= 7;
 
             /* Zero bitmask for this slot (ctm and lm) */
             bitmasks[bitmask_index] &= ~(1u << index_in_bitmask);
@@ -543,23 +511,6 @@ dequeue_pacing_queue() {
         pq_head_time += PQ_SLOT_TICKS; 
 
         pq_lm_dequeue_cnt++;
-
-        if (q_num == 32) continue;
-        /* If a packet was dequeued, check if we need to increment TX_R 
-            If so, wait until qc_sig is available */
-        local_qc_queue[q_num]++;
-        if (local_qc_queue[q_num] >= 8) wait_for_any(&qc_sig);
-
-        /* After waiting for raised qc_sig, check if still need to incr TX_R 
-            (as other threads may have done this work for us) */
-        if (local_qc_queue[q_num] >= 8) {
-            unsigned int qc_queue;
-            local_qc_queue[q_num] -= 8;
-            qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(q_num), NFD_IN_TX_QUEUE);
-            wait_for_all(&qc_sig);
-            __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, 8,
-                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
-        }
     }
 }
 
@@ -591,7 +542,7 @@ pq_find_next_available_slot(uint32_t pq_d_index)
             return (bitmask_index << INDEX_TO_BITMASK_SHIFT) + index_in_bitmask;
         }
 
-        /* New bitmask to check */
+        /* No available spot in bitmask, so try next one */
         index_in_bitmask = 0;
         bitmask_index++;
         if (bitmask_index >= PQ_BITMASKS_LENGTH)
@@ -599,7 +550,7 @@ pq_find_next_available_slot(uint32_t pq_d_index)
     }
 
     /* No slot found within 620-660 slots of initial */
-    DEBUG(0x0002);
+    /* Should never happen, indicates corruption/invalid state */
     halt();
     return 0;
 }
@@ -713,10 +664,6 @@ notify_setup_shared()
     wq_raddr = (unsigned long long) NFD_EMEM_LINK(PCIE_ISL) >> 8;
 #endif
 
-    /* Kick off ordering */
-    reorder_start(NFD_IN_NOTIFY_MANAGER0, &get_order_sig);
-    reorder_start(NFD_IN_NOTIFY_MANAGER1, &get_order_sig);
-
     /* Initialize head timer, and align it to slots */
     pq_head_time = get_current_time() & ~((uint64_t)PQ_SLOT_TICKS - 1ull);
 }
@@ -730,8 +677,6 @@ notify_setup(int side)
 {
     dst_q = wq_num_base;
     wait_msk = __signals(&msg_sig0, &msg_sig1);
-
-    next_ctx = reorder_get_next_ctx_off(ctx(), NFD_IN_NOTIFY_STRIDE);
 
     if (side == 0) {
         lso_ring_num = NFD_RING_LINK(PCIE_ISL, nfd_in_issued_lso,
@@ -747,11 +692,7 @@ notify_setup(int side)
 
     /* ------ k_pace: init & setup ------- */
 
-    /* Managers do not need our setup */
-    if (ctx() == NFD_IN_NOTIFY_MANAGER0 || ctx() == NFD_IN_NOTIFY_MANAGER1)
-        return;
-    
-    /* Raise wq signals to signal that batch_out is available 
+    /* Raised wq signals to signal that batch_out is available 
        (our solution assumes xwrite only available if it's signal is raised) */
     raise_signal(&wq_sig0);
     raise_signal(&wq_sig1);
@@ -763,7 +704,6 @@ notify_setup(int side)
     raise_signal(&wq_sig7);
 
     raise_signal(&qc_sig);
-
 }
 
 
@@ -814,27 +754,25 @@ do {                                                                    \
 
 #define _NOTIFY_PROC                                                         \
 do {                                                                         \
-    /* --------------k_pace -------------------------- */                    \
     /* Read pacing rate + flow id from vlan field */                         \
-    /* Use 12*ns->ticks, results in firmware inserting 4% smaller gaps*/     \
+    /* Use 12*ns->ticks, results in firmware inserting 4% smaller gaps */    \
     vlan_field = lm_batch_in.vlan;                                           \
-    ipg_ticks = (vlan_field & 0x0FFF)*12; /* 250ns -> 20ns ticks */          \
+    idt_ticks = (vlan_field & 0x0FFF)*12; /* 250ns -> 20ns ticks */          \
     flow_id = (vlan_field >> 12) & 0x000F;                                   \
                                                                              \
-    /* Calculate departure time for packet */                                \
-    curtime = get_current_time();                                            \
-    dep_time = flows_prev_dep_time[flow_id] + ipg_ticks;                     \
-    if ( dep_time <= curtime) dep_time = curtime;                            \
-    /* ----------------------------------------------- */                    \
-                                                                             \
-    /* finished packet and no LSO */                                         \
-    if (lm_batch_in.eop) {                                                   \
+    if (lm_batch_in.eop) {  /* finished packet and no LSO */                 \
                                                                              \
         __critical_path();                                                   \
         pkt_desc_tmp.is_nfd = lm_batch_in.eop;                               \
         pkt_desc_tmp.offset = lm_batch_in.offset;                            \
                                                                              \
         /* ======= Enqueue packet ===================================== */   \
+                                                                             \
+        /* Calculate departure time for packet */                            \
+        /* If dep time has elapsed, we send packet as soon as possible */    \
+        curtime = get_current_time();                                        \
+        dep_time = flows_prev_dep_time[flow_id] + idt_ticks;                 \
+        if ( dep_time <= curtime) dep_time = curtime;                        \
                                                                              \
         /* -------------- Get index ------------- */                         \
         delta_slots = 0;                                                     \
@@ -962,6 +900,13 @@ do {                                                                         \
                                                                              \
                 /* ======= Enqueue packet ============================= */   \
                                                                              \
+                /* Calculate departure time for packet */                    \
+                /* Note: could be more efficient by not reading prev dep_t */\
+                /*       for each TSO segment, but incr. dep_time directly */\
+                curtime = get_current_time();                                \
+                dep_time = flows_prev_dep_time[flow_id] + idt_ticks;         \
+                if ( dep_time <= curtime) dep_time = curtime;                \
+                                                                             \
                 /* -------------- Get index ------------- */                 \
                 delta_slots = 0;                                             \
                                                                              \
@@ -971,14 +916,14 @@ do {                                                                         \
                                                     PQ_TICKS_TO_SLOT_SHIFT); \
                                                                              \
                 /* Ensure packet is not enqueued to far in future */         \
-                /*  and update departure time of next packet in tso chunk */ \
+                /*  and update last departure time of flow  */               \
                 if (delta_slots > PQ_TRESH_FUTURE_SLOTS) {                   \
-                    dep_time +=                                              \
-                        ipg_ticks - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);  \
+                    flows_prev_dep_time[flow_id] =                           \
+                        dep_time - PQ_DEP_TIME_DIFF_TRESHOLD(delta_slots);   \
                     delta_slots = PQ_TRESH_FUTURE_SLOTS;                     \
                 } else {                                                     \
                     __critical_path();                                       \
-                    dep_time += ipg_ticks;                                   \
+                    flows_prev_dep_time[flow_id] = dep_time;                 \
                 }                                                            \
                                                                              \
                 /* Find desired (CTM) slot to enqueue in relation to head */ \
@@ -1035,24 +980,16 @@ do {                                                                         \
                                                                              \
             }                                                                \
                                                                              \
-            /* if it is last LSO being read from ring */                     \
-            if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) {            \
-                /* k_pace: update last departure time (substract last add)*/ \
-                /* todo: last add may not be full ipg */                     \
-                flows_prev_dep_time[flow_id] = dep_time-ipg_ticks;           \
-                                                                             \
-                /* Break out of loop processing LSO ring */                  \
-                break;                                                       \
-            }                                                                \
+            /* if last LSO from ring, break out of LSO loop */               \
+            if (lso_pkt.desc.lso == NFD_IN_ISSUED_DESC_LSO_RET) break;       \
         }                                                                    \
     }                                                                        \
 } while (0)
 
 __intrinsic void
 sync_dequeue_loop() {
-    /* Participate in ctm_ring_get ordering */
-    wait_for_all(&get_order_sig);
-    reorder_done_opt(&next_ctx, &get_order_sig);
+    /* Give other threads chance to run */
+    ctx_swap();
 
     sync_ctm_lm();
     dequeue_pacing_queue();
@@ -1083,14 +1020,13 @@ _notify(__shared __gpr unsigned int *complete,
 
     /* K_pace: variables we use to enqueue */
     uint16_t vlan_field;
-    uint32_t flow_id, ipg_ticks, pq_index, pq_d_index, delta_slots;
+    uint32_t flow_id, idt_ticks, pq_index, pq_d_index, delta_slots;
     uint64_t dep_time, curtime;
 
     unsigned int i;
 
-    /* Reorder before potentially issuing a ring get */
-    wait_for_all(&get_order_sig);
-    reorder_done_opt(&next_ctx, &get_order_sig);
+    /* Give other threads chance to run */
+    ctx_swap();
 
     /* There is a FULL batch to process */
     num_avail = *complete - *served;
@@ -1114,11 +1050,6 @@ _notify(__shared __gpr unsigned int *complete,
         __implicit_read(&msg_sig0);
         __implicit_read(&msg_sig1);
 
-        /* Batches have a least one packet, but n_batch may still be
-         * zero, meaning that the queue is down.  In this case, EOP for
-         * all the packets should also be zero, so that notify will
-         * essentially skip the batch.
-         */
         n_batch = batch_in.pkt0.num_batch;
 
         /* Interface and queue info are the same for all packets in batch */
@@ -1140,13 +1071,22 @@ _notify(__shared __gpr unsigned int *complete,
             _NOTIFY_PROC;
         }
 
+        /* Map batch.queue to a QC queue and increment the TX_R pointer
+         * for that queue by n_batch */
+        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
+                               NFD_IN_TX_QUEUE);
+
+        wait_for_all(&qc_sig);
+        
+        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
+                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+
     } else if (num_avail > 0) {
         /* There is a partial batch - process messages one at a time. */
         unsigned int partial_served = 0;
 
         wait_msk &= ~__signals(&msg_sig1);
 
-        /* ctm_ring_get() uses sig_done */
         ctm_ring_get(NOTIFY_RING_ISL, input_ring, &batch_in.pkt0,
                      sizeof(struct nfd_in_issued_desc), &msg_sig0);
 
@@ -1154,7 +1094,10 @@ _notify(__shared __gpr unsigned int *complete,
         __implicit_read(&msg_sig0);
 
 
-        /* This is the first message in the batch. */
+        /* This is the first message in the batch. Set wait mask to msg_sig0 */
+        n_batch = batch_in.pkt0.num_batch;
+        qc_queue = NFD_NATQ2QC(NFD_BMQ2NATQ(batch_in.pkt0.q_num),
+                               NFD_IN_TX_QUEUE);
         wait_msk = __signals(&msg_sig0);
 
         /* Interface and queue info is the same for all packets in batch */
@@ -1204,6 +1147,12 @@ _notify(__shared __gpr unsigned int *complete,
         lm_batch_in = batch_in.pkt0;
         _NOTIFY_PROC;
 
+        wait_for_all(&qc_sig);
+
+        /* Increment the TX_R pointer for this queue by n_batch */
+        __qc_add_to_ptr_ind(PCIE_ISL, qc_queue, QC_RPTR, n_batch,
+                            NFD_IN_NOTIFY_QC_RD, sig_done, &qc_sig);
+
     }
 }
 
@@ -1233,9 +1182,8 @@ notify(int side)
 __intrinsic void
 notify_manager_reorder()
 {
-    /* Participate in ordering */
-    wait_for_all(&get_order_sig);
-    reorder_done_opt(&next_ctx, &get_order_sig);
+    /* Give other threads chance to run */
+    ctx_swap();
 }
 
 
@@ -1317,14 +1265,7 @@ main(void)
     notify_setup_visible();
 
     if (ctx() == 0) {
-        /*
-         * This function will start ordering for CTX0,
-         * the manager for loop 0
-         */
         notify_setup_shared();
-
-        /* NFD_INIT_DONE_SET(PCIE_ISL, 2);     /\* XXX Remove? *\/ */
-
     }
 
     /* Test which side the context is servicing */
