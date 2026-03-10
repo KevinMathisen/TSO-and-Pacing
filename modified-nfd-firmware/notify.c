@@ -728,6 +728,7 @@ notify_setup(int side)
     raise_signal(&wq_sig6);
     raise_signal(&wq_sig7);
 
+    raise_signal(&qc_sig);
 }
 
 
