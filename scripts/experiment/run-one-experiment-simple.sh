@@ -116,8 +116,8 @@ while [[ $# -gt 0 ]]; do
     --tso-pacing)   TREATMENT="tso-pacing"; shift ;;
     --direct-link)  CONNECTION_MODE="direct-link"; FLOWS=2; shift ;;
     --internet)     CONNECTION_MODE="internet"; FLOWS=4; shift ;;
-    --datacenter)   CONNECTION_MODE="datacenter"; FLOWS=8; shift ;;
-    --datacenter-hc) CONNECTION_MODE="datacenter-hc"; FLOWS=8; shift ;;
+    --datacenter)   CONNECTION_MODE="datacenter"; FLOWS=4; shift ;;
+    --datacenter-hc) CONNECTION_MODE="datacenter-hc"; FLOWS=4; shift ;;
     --fq)           QDISC="fq"; shift ;;
     --fq-codel)     QDISC="fq_codel"; shift ;;
     --help)
