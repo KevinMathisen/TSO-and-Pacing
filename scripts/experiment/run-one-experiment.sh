@@ -55,7 +55,7 @@ setup_server() {
     fq_codel) qdisc_flag="--fq-codel" ;;
   esac
 
-  ./setup-server-experiment "$tso_flag" "$mode_flag" "$qdisc_flag"
+  "$SCRIPT_PATH"./setup-server-experiment "$tso_flag" "$mode_flag" "$qdisc_flag"
 }
 
 setup_client() {
@@ -67,7 +67,9 @@ setup_client() {
     datacenter-hc) mode_flag="--datacenter-hc" ;;
   esac
 
-  ssh -o BatchMode=yes "$CLIENT_SSH" "sudo ./setup-client-experiment $mode_flag"
+  ssh -o BatchMode=yes "$CLIENT_SSH" "sudo $SCRIPT_PATH/setup-client-experiment.sh $mode_flag"
+  # ensure no running iperf3
+  ssh "$CLIENT_SSH" "sudo pkill -f 'iperf3 -s'" 2>/dev/null || true
 }
 
 setup_external() {
@@ -96,20 +98,20 @@ save_external_stats() {
 
 # ========= Configuration ==========
 
-SERVER_IP="10.111.0.1"
-CLIENT_IP="10.111.0.2"
+SERVER_IP="10.111.0.1" # fleming
+CLIENT_IP="10.111.0.2" # munnin
 EXTERNAL_HOST_IP="10.111.0.3"
 
 SERVER_DEV="enp2s0np0"
-CLIENT_DEV="enp2s0np0"
+CLIENT_DEV="enp1s0np0"
 EXTERNAL_HOST_DEV="enp2s0np0"
 
 USER="kevinm"
 CLIENT_SSH="$USER@$CLIENT_IP"
 EXTERNAL_SSH="$USER@$EXTERNAL_HOST_IP"
 
-DUR=4   # seconds to run
-START_CAPTURE=2 # second to start capture
+DUR=8   # seconds to run
+START_CAPTURE=5 # second to start capture
 IPERF_PORT=5201
 CAPTURE_FILTER="tcp and src host $SERVER_IP and dst host $CLIENT_IP and dst port $IPERF_PORT"
 
@@ -128,8 +130,8 @@ while [[ $# -gt 0 ]]; do
     --tso-pacing)   TREATMENT="tso-pacing"; shift ;;
     --direct-link)  CONNECTION_MODE="direct-link"; FLOWS=2; shift ;;
     --internet)     CONNECTION_MODE="internet"; FLOWS=4; shift ;;
-    --datacenter)   CONNECTION_MODE="datacenter"; FLOWS=8; shift ;;
-    --datacenter-hc) CONNECTION_MODE="datacenter-hc"; FLOWS=8; shift ;;
+    --datacenter)   CONNECTION_MODE="datacenter"; FLOWS=4; shift ;;
+    --datacenter-hc) CONNECTION_MODE="datacenter-hc"; FLOWS=4; shift ;;
     --fq)           QDISC="fq"; shift ;;
     --fq-codel)     QDISC="fq_codel"; shift ;;
     --help)
@@ -147,7 +149,7 @@ done
 
 
 TS="$(date +%Y%m%d_%H%M%S)"
-RUN_NAME="${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run${RUN_NUM}_${TS}"
+RUN_NAME="${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run_${RUN_NUM}___${TS}"
 OUT_DIR="./runs/$RUN_NAME"
 mkdir -p "$OUT_DIR"
 
@@ -162,7 +164,7 @@ dur=$DUR
 start_capture=$START_CAPTURE
 EOF
 
-# ========================================= #
+# =========================================
 
 echo ""
 echo "Running experiment $RUN_NAME!"
@@ -198,8 +200,7 @@ echo "Client iperf3 server pid: $CLIENT_IPERF_PID"
 
 # TODO: maybe also probe fq_codel queue length and save this.
 
-
-sleep 0.5
+sleep 1
 
 echo ""
 echo "Starting data transmission from SERVER (starting iperf3 client)"
@@ -212,10 +213,10 @@ SERVER_IPERF_PID="$!"
 sleep "$START_CAPTURE"
 
 echo ""
-echo "Starting pcap on in EXTERNAL HOST"
+echo "Starting pcap on EXTERNAL HOST"
 CAPTURE_OUT="capture_${RUN_NAME}.pcapng"
 
-ssh "$EXTERNAL_SSH" "sudo dumpcap -i $EXTERNAL_HOST_DEV -w /tmp/$CAPTURE_OUT -f \"$CAPTURE_FILTER\" -s 160 -B 256 -a duration:1 -S > /tmp/dumpcap_${RUN_NAME}.log 2>&1"
+ssh "$EXTERNAL_SSH" "sudo dumpcap -q -i $EXTERNAL_HOST_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 160 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
 
 # Wait until everything done
 wait "$SERVER_IPERF_PID"
@@ -228,8 +229,13 @@ CLIENT_IPERF_PID=""
 
 # capture done, retrieve output (wait until iperf done)
 echo "Copying "
-scp "$EXTERNAL_SSH:/tmp/$CAPTURE_OUT" "$OUT_DIR/$CAPTURE_OUT"
+ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER /dev/shm/$CAPTURE_OUT /tmp/dumpcap_${RUN_NAME}.log"
+scp "$EXTERNAL_SSH:/dev/shm/$CAPTURE_OUT" "$OUT_DIR/$CAPTURE_OUT"
 scp "$EXTERNAL_SSH:/tmp/dumpcap_${RUN_NAME}.log" "$OUT_DIR/dumpcap_${RUN_NAME}.log" || true
+
+# Then remove capture
+ssh "$EXTERNAL_SSH" "sudo rm /dev/shm/$CAPTURE_OUT /tmp/dumpcap_${RUN_NAME}.log"
+
 
 # ====== Save interface stats after ====== 
 # should save all interfaces, if EXTERNAL HOST PCAP dropped any packets, client IFB, and of course iperf client on SERVER statistics.  
