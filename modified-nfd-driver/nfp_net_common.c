@@ -66,7 +66,7 @@
 /* K: pacing modifications
    Store print call counter for each CPU */
 static DEFINE_PER_CPU(u32, printk_call_counter);
-static u32 hash_to_flowid[8];
+static u32 hash_to_flowid[31];
 static u32 last_flowid_idx;
 
 /**
@@ -769,16 +769,18 @@ static void nfp_net_tx_non_tso_idt(struct nfp_net_tx_desc *txd,
 
 	idt_250ns = 0;
 
+	/* Convert pacing rate to inter-departure time in 250ns increments */
 	if (pacing_rate && pacing_rate != ~0UL)
 			idt_250ns = DIV_ROUND_UP( (u64)packet_size * 4000000ULL,
 													(u64)pacing_rate );
 
-	max_idt_250ns = 4000ULL;
+	/* Cap idt to 0.5 ms */
+	max_idt_250ns = 2000ULL;
 	if (idt_250ns > max_idt_250ns) 
 		idt_250ns = max_idt_250ns;
 		
-	if (idt_250ns > 0xFFF)
-	 	idt_250ns = 0xFFF;
+	if (idt_250ns > 0x7FF)
+	 	idt_250ns = 0x7FF;
 	
 	txd->vlan = cpu_to_le16((u16)idt_250ns);
 
@@ -828,17 +830,16 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 	*/
 
 	/*
-	-------------- K: pacing modifications ----------------
+	-------------- Pacing modifications ----------------
 
 	Instead of setting l3/l4 offset, we use the whole field 
 		(vlan/l3+l4_offset) to set the pacing rate.
 
-	Firmware:
+	Firmware (modified):
 		Does not use l3/l4 offset values
 		Interprets vlan field as IDT in 250ns ticks
-		(If later use time wheel, can set IDT in time wheel slots)
 
-	Convert sk_pacing_rate (B/s) -> IDT in 250ns (12 bits -> 250ns - 1.024ms)
+	Convert sk_pacing_rate (B/s) -> IDT in 250ns (12 bits -> 250ns - 0.512ms)
 	*/
 	{
 		struct sock *sk;
@@ -861,23 +862,24 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 													(u64)pacing_rate );
 		
 		/* Need a max idt to not wrap queue in firmware
-			(total IDT for burst should not exceed 1ms) */
+		   Total IDT for burst should not exceed 1ms
+			(TSO has >= 2 pkt, so effectively cap idt to <= 0.5 ms) */
 		if (txbuf->pkt_cnt) {
 			max_idt_250ns = DIV_ROUND_UP(4000ULL, txbuf->pkt_cnt);
 			if (idt_250ns > max_idt_250ns) 
 				idt_250ns = max_idt_250ns;
 		}
 		
-		// clamp to 12 bits
-		if (idt_250ns > 0xFFF)
-			idt_250ns = 0xFFF;
+		/* Clamp to 11 bits */
+		if (idt_250ns > 0x7FF)
+			idt_250ns = 0x7FF;
 		
 		/* 16 bit Vlan field: 
-		15      12 11               0
-		+---------+-----------------+
-		| FLOW_ID | PACING_RATE     |
-		+---------+-----------------+
-			4 bits     12 bits
+		15       11 10              0
+		+----------+----------------+
+		| FLOW_ID  |  PACING_RATE   |
+		+----------+----------------+
+		   5 bits       11 bits
 		*/
 		txd->vlan = cpu_to_le16((u16)idt_250ns);
 
@@ -976,11 +978,16 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	/*
 	Hash to flow ID mapping:
 
-		last_flowid_idx				this maps to flowID 3
+		last_flowid_idx				this maps to flowID 4 (index 3 + 1)
 			|								|
 		+----------+-------+---------+----------+-----+
 		| hash 4   |   -   | hash 1  | hash 2	| ... |
 		+----------+-------+---------+----------+-----+
+		 0    |     1        2         3             30      
+		      |
+		maps to flowID 1 (as 0 is reserved for no pacing)
+
+	We have 5 bits, so 32-1 = 31 concurrent flows
 	*/
 
 	u32 flow_hash;
@@ -990,32 +997,37 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	flow_hash = skb_get_hash(skb);
 	if (!flow_hash) return;
 
-	flowId = 15;
+	/* No IDT set -> don't pace this flow (leave flowID as 0) */
+	vlan_field = le16_to_cpu(txd->vlan);
+	if (!vlan_field) return;
+
+	flowId = 0;
+
 	/* Check if hash is in mapping. If so use flow ID (index) here */
-	for (i = 0; i < 8; i++) {
+	for (i = 0; i < 31; i++) {
 		if (READ_ONCE(hash_to_flowid[i]) == flow_hash) {
-			flowId = i;
+			flowId = i+1;
 			break;
 		}
 	}
 
 	/* If no mapping, we overwrite last/oldest flows mapping. */
-	if (flowId == 15) {
-		unsigned int idx = (READ_ONCE(last_flowid_idx)+1)&7;
+	if (!flowId) {
+		unsigned int idx = READ_ONCE(last_flowid_idx)+1;
+		if (idx == 31) idx = 0;
 		WRITE_ONCE(hash_to_flowid[idx], flow_hash);
 		WRITE_ONCE(last_flowid_idx, idx);
-		flowId = idx;
+		flowId = idx+1;
 	}
 
 	/* 16 bit Vlan field: 
-	  15      12 11               0
-	  +---------+-----------------+
-	  | FLOW_ID | PACING_RATE     |
-	  +---------+-----------------+
-	    4 bits     12 bits
+	15       11 10              0
+	+----------+----------------+
+	| FLOW_ID  |  PACING_RATE   |
+	+----------+----------------+
+		5 bits       11 bits
 	*/
-	vlan_field = le16_to_cpu(txd->vlan);
-	vlan_field |= ((flowId & 0xF) << 12);
+	vlan_field |= ((flowId & 0x1F) << 11);
 	txd->vlan = cpu_to_le16(vlan_field);
 }
 
