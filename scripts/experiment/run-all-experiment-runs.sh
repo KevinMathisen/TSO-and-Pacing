@@ -19,7 +19,7 @@ for arg in "$@"; do
   esac
 done
 
-[ -d "$TREATMENT" ] || { echo "Missing TREATMENT: $TREATMENT"; exit 1; }
+[ -z "$TREATMENT" ] || { echo "Missing TREATMENT: $TREATMENT"; exit 1; }
 
 run_setup () {
   local mode="$1"

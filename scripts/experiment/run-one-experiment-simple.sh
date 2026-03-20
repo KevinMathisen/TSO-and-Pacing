@@ -134,8 +134,8 @@ done
 [[ -n "$QDISC" ]] || { echo "Must specify qdisc"; exit 1; }
 
 
-TS="$(date +%Y%m%d_%H%M)"
-RUN_NAME="${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run_${RUN_NUM}________${TS}"
+TS="$(date +%Y%m%d)"
+RUN_NAME="${TS}___${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run_${RUN_NUM}"
 OUT_DIR="./runs/$RUN_NAME"
 mkdir -p "$OUT_DIR"
 

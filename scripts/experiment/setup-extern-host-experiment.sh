@@ -6,10 +6,10 @@ if (( EUID != 0 )); then
   exit 1
 fi
 
-DEV="enp2s0np0"
+DEV="enp1s0np0"
 
 # Ensure no lro/gro
-ethtool -K "$DEV" lro off gro off
+ethtool -K enp1s0np0 gro off
 
 # Set cpu to performance
 cpufreq-set -g performance

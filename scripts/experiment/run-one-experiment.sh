@@ -73,7 +73,7 @@ setup_client() {
 }
 
 setup_external() {
-  ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo ./setup-external-host-experiment"
+  ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo $SCRIPT_PATH/setup-external-host-experiment"
 }
 
 # ========= Functions for saving interface stats ==========
@@ -100,15 +100,17 @@ save_external_stats() {
 
 SERVER_IP="10.111.0.1" # fleming
 CLIENT_IP="10.111.0.2" # munnin
-EXTERNAL_HOST_IP="10.111.0.3"
+EXTERNAL_HOST_IP="172.16.5.150"
 
 SERVER_DEV="enp2s0np0"
 CLIENT_DEV="enp1s0np0"
-EXTERNAL_HOST_DEV="enp2s0np0"
+EXTERNAL_HOST_DEV="enp1s0np0"
 
 USER="kevinm"
 CLIENT_SSH="$USER@$CLIENT_IP"
 EXTERNAL_SSH="$USER@$EXTERNAL_HOST_IP"
+
+SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 
 DUR=8   # seconds to run
 START_CAPTURE=5 # second to start capture
@@ -148,8 +150,8 @@ done
 [[ -n "$QDISC" ]] || { echo "Must specify qdisc"; exit 1; }
 
 
-TS="$(date +%Y%m%d_%H%M%S)"
-RUN_NAME="${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run_${RUN_NUM}___${TS}"
+TS="$(date +%Y%m%d)"
+RUN_NAME="${TS}___${CONNECTION_MODE}_${QDISC}_${TREATMENT}_run_${RUN_NUM}"
 OUT_DIR="./runs/$RUN_NAME"
 mkdir -p "$OUT_DIR"
 
@@ -198,7 +200,7 @@ echo "Starting iperf3 server on CLIENT"
 CLIENT_IPERF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'nohup iperf3 -s -p $IPERF_PORT > /tmp/iperf_server_${RUN_NAME}.log 2>&1 & echo \$!'")"
 echo "Client iperf3 server pid: $CLIENT_IPERF_PID"
 
-# TODO: maybe also probe fq_codel queue length and save this.
+# TODO: maybe also probe fq CLIENT queue length and save this.
 
 sleep 1
 

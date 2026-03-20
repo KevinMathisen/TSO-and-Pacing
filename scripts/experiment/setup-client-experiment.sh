@@ -56,7 +56,7 @@ if [ "$CONNECTION_MODE" = "internet" ]; then
     # Max 10000 pkts -> 10000*1500 B = 15 MB buffer
     tc qdisc replace dev ifb0 root fq \
       maxrate 500mbit \
-      limit 10000 flow_limit 4000
+      limit 10000 flow_limit 10000
 
     echo "Interface $DEV configured with Internet (50 ms RTT, 1 Gbps)"
 
@@ -70,13 +70,13 @@ elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-hi
     # Max 3000 pkts -> 3000*1500 B = 4.5 MB buffer
     tc qdisc replace dev ifb0 root fq \
       maxrate 1gbit ce_threshold 90us \
-      limit 3000 flow_limit 4000
+      limit 3000 flow_limit 3000
 
     if [ "$CONNECTION_MODE" = "datacenter-high-contention" ]; then
       # Max 200 pkts -> 200*1500 B = 300 kB buffer
       tc qdisc replace dev ifb0 root fq \
         maxrate 1gbit ce_threshold 90us \
-        limit 200 flow_limit 4000
+        limit 200 flow_limit 200
     fi
 
     sysctl -w net.ipv4.tcp_congestion_control=dctcp
