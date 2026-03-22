@@ -77,28 +77,6 @@ def get_first_flow_timeseries(df_packets: pd.DataFrame, bin_us: int) -> pd.DataF
     return build_packets_per_bin_timeseries(t_s, bin_us)
 
 
-def per_flow_packets_per_bin_distribution(df: pd.DataFrame, bin_us: int) -> np.ndarray:
-    """
-    Compute packets-per-bin distribution across all runs, but bin each flow in each run separately.
-    """
-    all_bin_counts = []
-
-    for _, df_flow in df.groupby(["run_num", "stream_id"], sort=True):
-        t_s = packet_times_s(df_flow)
-        if len(t_s) == 0:
-            continue
-
-        bin_width_s = bin_us / 1e6
-        t0 = float(t_s.min())
-        idx = np.floor((t_s - t0) / bin_width_s).astype(np.int64)
-        n_bins = int(idx.max() + 1)
-
-        flow_bin_counts = np.bincount(idx, minlength=n_bins)
-        all_bin_counts.append(flow_bin_counts)
-
-    return np.concatenate(all_bin_counts)
-
-
 def per_flow_inter_departure_us(df: pd.DataFrame) -> np.ndarray:
     """
     For each flow in each run:
@@ -192,7 +170,6 @@ def prepare_solution_data(solution_data: dict) -> dict:
 
     first_flow_timeseries = get_first_flow_timeseries(packets, MICRO_BIN_US)
 
-    per_flow_packets_per_bin = per_flow_packets_per_bin_distribution(packets, MICRO_BIN_US)
     per_flow_idt_us = per_flow_inter_departure_us(packets)
     aggregate_idt_us = aggregate_inter_departure_us(packets)
 
@@ -202,7 +179,6 @@ def prepare_solution_data(solution_data: dict) -> dict:
         "cpu_sender": cpu_sender,
         "cpu_receiver": cpu_receiver,
         "first_flow_timeseries": first_flow_timeseries,
-        "packets_per_bin": per_flow_packets_per_bin,
         "per_flow_idt_us": per_flow_idt_us,
         "aggregate_idt_us": aggregate_idt_us,
     }
@@ -402,39 +378,6 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
 
     _save_close(fig, out_path)
 
-
-def plot_packets_per_bin_violin(solutions: list[dict], out_path: Path):
-    fig = plt.figure(figsize=(8, 6))
-
-    data = [sol["packets_per_bin"] for sol in solutions]
-    positions = np.arange(1, len(solutions) + 1)
-
-    parts = plt.violinplot(
-        data,
-        positions=positions,
-        showmeans=False,
-        showmedians=True,
-        showextrema=True,
-    )
-
-    for body, sol in zip(parts["bodies"], solutions):
-        body.set_facecolor(sol["color"])
-        body.set_edgecolor(sol["color"])
-        body.set_alpha(0.35)
-
-    for k in ("cbars", "cmins", "cmaxes", "cmedians"):
-        if k in parts:
-            parts[k].set_color("black")
-            parts[k].set_linewidth(1.0)
-
-    plt.xticks(positions, [sol["label"] for sol in solutions])
-    plt.ylabel(f"Packets per {MICRO_BIN_US} µs bin")
-    # plt.title(f"Distribution of packets per {MICRO_BIN_US} µs bin")
-    plt.grid(True, axis="y", linestyle="--", alpha=0.5)
-
-    _save_close(fig, out_path)
-
-
 def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out_path: Path):
     fig = plt.figure(figsize=(10, 6))
 
@@ -487,11 +430,6 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     plot_firstflow_timeseries(
         solutions, setup,
         setup_dir / f"timeseries_{MICRO_BIN_US}us.png",
-    )
-
-    plot_packets_per_bin_violin(
-        solutions,
-        setup_dir / f"packets_per_{MICRO_BIN_US}us_bin_violin.png",
     )
 
     plot_cdf(
