@@ -218,7 +218,7 @@ echo ""
 echo "Starting pcap on EXTERNAL HOST"
 CAPTURE_OUT="capture_${RUN_NAME}.pcapng"
 
-ssh "$EXTERNAL_SSH" "sudo dumpcap -q -i $EXTERNAL_HOST_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 160 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
+ssh "$EXTERNAL_SSH" "sudo dumpcap -q -i $EXTERNAL_HOST_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 96 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
 
 # Wait until everything done
 wait "$SERVER_IPERF_PID"
