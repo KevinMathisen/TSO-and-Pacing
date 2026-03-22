@@ -19,7 +19,7 @@ for arg in "$@"; do
   esac
 done
 
-[ -z "$TREATMENT" ] || { echo "Missing TREATMENT: $TREATMENT"; exit 1; }
+[ -n "$TREATMENT" ] || { echo "Missing TREATMENT: $TREATMENT"; exit 1; }
 
 run_setup () {
   local mode="$1"
@@ -32,6 +32,7 @@ run_setup () {
 
   for ((i=1; i<=RUNS_PER_SETUP; i++)); do
     ./run-one-experiment.sh --run-num "$i" "$mode" "$qdisc" "$treatment"
+    sleep 10
   done
 }
 
@@ -39,11 +40,11 @@ run_setup () {
 MODES=(--direct-link --internet --datacenter --datacenter-hc)
 
 for mode in "${MODES[@]}"; do
-  run_setup "$mode" --fq "$TREATMENT"
+  run_setup "$mode" --fq "--$TREATMENT"
 done
 
 # run experiment with fq_codel and direct link
-run_setup --direct-link --fq-codel "$TREATMENT"
+run_setup --direct-link --fq-codel "--$TREATMENT"
 
 
 
