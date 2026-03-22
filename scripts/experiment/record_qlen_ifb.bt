@@ -1,0 +1,3 @@
+tracepoint:qdisc:qdisc_enqueue /str(args->dev) == "ifb0"/ {
+    @qlen_counts[args->qlen] = count();
+}

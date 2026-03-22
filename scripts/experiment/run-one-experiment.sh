@@ -26,6 +26,9 @@ cleanup() {
   else
     ssh "$CLIENT_SSH" "sudo pkill -f 'iperf3 -s'" 2>/dev/null
   fi
+  if [[ -n "$CLIENT_BPF_PID" ]]; then
+    ssh "$CLIENT_SSH" "sudo kill -INT $CLIENT_BPF_PID" 2>/dev/null
+  fi
   if [[ -n "$EXTERNAL_DUMPCAP_PID" ]]; then
     ssh "$EXTERNAL_SSH" "sudo kill $EXTERNAL_DUMPCAP_PID" 2>/dev/null
   else
@@ -199,7 +202,13 @@ echo "Starting iperf3 server on CLIENT"
 CLIENT_IPERF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'nohup iperf3 -s -p $IPERF_PORT > /tmp/iperf_server_${RUN_NAME}.log 2>&1 & echo \$!'")"
 echo "Client iperf3 server pid: $CLIENT_IPERF_PID"
 
-# TODO: maybe also probe fq CLIENT queue length and save this.
+# probe fq queue length if not direct link
+if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
+  echo ""
+  echo "Starting bpftrace on CLIENT (for ifb0)"
+  CLIENT_BPF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'BPFTRACE_MAP_KEYS_MAX=65536 nohup bpftrace $SCRIPT_PATH/monitor_qlen.bt > /tmp/bpf_monitor_${RUN_NAME}.txt 2>&1 & echo \$!'")"
+  echo "Client bpftrace pid: $CLIENT_BPF_PID"
+fi
 
 sleep 1
 
@@ -219,9 +228,17 @@ CAPTURE_OUT="capture_${RUN_NAME}.pcapng"
 
 ssh "$EXTERNAL_SSH" "sudo dumpcap -q -i $EXTERNAL_HOST_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 96 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
 
+
 # Wait until everything done
 wait "$SERVER_IPERF_PID"
 sleep 1
+
+if [[ -n "$CLIENT_BPF_PID" ]]; then
+  echo "Stopping bpftrace on CLIENT"
+  ssh "$CLIENT_SSH" "sudo kill -INT $CLIENT_BPF_PID" || true
+  CLIENT_BPF_PID=""
+  sleep 1
+fi
 
 echo ""
 echo "Data transmission done, stopping iperf3 server on CLIENT"
@@ -233,10 +250,14 @@ echo "Copying "
 ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER /dev/shm/$CAPTURE_OUT /tmp/dumpcap_${RUN_NAME}.log"
 scp "$EXTERNAL_SSH:/dev/shm/$CAPTURE_OUT" "$OUT_DIR/$CAPTURE_OUT"
 scp "$EXTERNAL_SSH:/tmp/dumpcap_${RUN_NAME}.log" "$OUT_DIR/dumpcap_${RUN_NAME}.log" || true
+if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
+  ssh "$CLIENT_SSH" "sudo chown $USER:$USER /tmp/bpf_monitor_${RUN_NAME}.txt 2>/dev/null" || true
+  scp "$CLIENT_SSH:/tmp/bpf_monitor_${RUN_NAME}.txt" "$OUT_DIR/bpf_monitor_${RUN_NAME}.txt" || true
+fi
 
 # Then remove capture
 ssh "$EXTERNAL_SSH" "sudo rm /dev/shm/$CAPTURE_OUT /tmp/dumpcap_${RUN_NAME}.log"
-
+ssh "$CLIENT_SSH" "sudo rm -f /tmp/bpf_monitor_${RUN_NAME}.txt"
 
 # ====== Save interface stats after ====== 
 # should save all interfaces, if EXTERNAL HOST PCAP dropped any packets, client IFB, and of course iperf client on SERVER statistics.  
@@ -248,6 +269,10 @@ save_external_stats after
 
 # save qdisc used on server
 tc -s qdisc show dev "$SERVER_DEV" > "$OUT_DIR/server_qdisc.txt" || true
+
+
+# change owner of output to user
+chown -R "$USER:$USER" "$OUT_DIR"
 
 
 echo ""
