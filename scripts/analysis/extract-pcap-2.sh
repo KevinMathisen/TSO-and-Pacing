@@ -55,74 +55,78 @@ RUN_TYPES=(
 )
 
 for run_type in "${RUN_TYPES[@]}"; do
-  echo ""
-  echo "Processing run type: $run_type"
+  (
+    echo ""
+    echo "Processing run type: $run_type"
 
-  OUT_DIR="$AGG_DIR/$run_type"
-  mkdir -p "$OUT_DIR"
+    OUT_DIR="$AGG_DIR/$run_type"
+    mkdir -p "$OUT_DIR"
 
-  PACKETS_CSV="$OUT_DIR/packets.csv"
-  METRICS_CSV="$OUT_DIR/metrics.csv"
-  RTT_JSON="$OUT_DIR/rtt.json"
+    PACKETS_CSV="$OUT_DIR/packets.csv"
+    METRICS_CSV="$OUT_DIR/metrics.csv"
+    RTT_JSON="$OUT_DIR/rtt.json"
 
-  # initial aggregate files for run type
-  echo 'run_name,run_num,stream_id,tcp_len,p4_timestamp_ns,p4_timestamp_prev_ns' > "$PACKETS_CSV"
-  echo 'run_name,run_num,throughput_bps,cpu_sender,cpu_receiver,retransmissions,fast_retransmissions,out_of_order,lost_segments,server_drops,client_drops,client_ifb_drops,external_drops,dumpcap_drops' > "$METRICS_CSV"
-  echo '[]' > "$RTT_JSON"
+    # initial aggregate files for run type
+    echo 'run_name,run_num,stream_id,tcp_len,p4_timestamp_ns,p4_timestamp_prev_ns' > "$PACKETS_CSV"
+    echo 'run_name,run_num,throughput_bps,cpu_sender,cpu_receiver,retransmissions,fast_retransmissions,out_of_order,lost_segments,server_drops,client_drops,client_ifb_drops,external_drops,dumpcap_drops' > "$METRICS_CSV"
+    echo '[]' > "$RTT_JSON"
 
-  for (( run_num=1; run_num<=RUNS_NUM; run_num++ )); do
-    echo "  Run $run_num"
+    for (( run_num=1; run_num<=RUNS_NUM; run_num++ )); do
+      echo "  $run_type: Run $run_num"
 
-    # Assume one dir matching <run_type>_run_<run_num>________<timestamp>
-    # NEW dir naming: <timestamp>___<run_type>_run_<run_num>
-    RUN_PATH="$(find "$DUMP_DIR" -maxdepth 1 -type d -name "*_${run_type}_run_${run_num}*" | head -n1)"
-    RUN_NAME="${run_type}_run_${run_num}"
+      # Assume one dir matching <run_type>_run_<run_num>________<timestamp>
+      # NEW dir naming: <timestamp>___<run_type>_run_<run_num>
+      RUN_PATH="$(find "$DUMP_DIR" -maxdepth 1 -type d -name "*_${run_type}_run_${run_num}*" | head -n1)"
+      RUN_NAME="${run_type}_run_${run_num}"
 
-    TMP_DIR="$OUT_DIR/tmp_run_${run_num}"
-    mkdir -p "$TMP_DIR"
+      TMP_DIR="$OUT_DIR/tmp_run_${run_num}"
+      mkdir -p "$TMP_DIR"
 
-    PCAP_IN="$(find "$RUN_PATH" -maxdepth 1 -name 'capture_*.pcapng' | head -n1)"
-    RAW_CSV="$TMP_DIR/tshark_raw.csv"
-    PARSED_CSV="$TMP_DIR/packets_parsed.csv"
-    METRICS_ROW="$TMP_DIR/metrics_row.csv"
+      PCAP_IN="$(find "$RUN_PATH" -maxdepth 1 -name 'capture_*.pcapng' | head -n1)"
+      RAW_CSV="$TMP_DIR/tshark_raw.csv"
+      PARSED_CSV="$TMP_DIR/packets_parsed.csv"
+      METRICS_ROW="$TMP_DIR/metrics_row.csv"
 
-    echo "    Extracting fields with thark..."
-    # Convert pcap to csv using thsark to extract following for timestamp analysis
-    tshark -n -r "$PCAP_IN" \
-      -T fields -E header=y -E separator=, -E quote=d \
-      -o tcp.desegment_tcp_streams:FALSE \
-      -o ip.defragment:FALSE -o ipv6.defragment:FALSE \
-      -o tcp.check_checksum:FALSE \
-      -e frame.time_epoch -e frame.number \
-      -e tcp.stream -e tcp.seq -e tcp.len \
-      -e tcp.analysis.retransmission -e tcp.analysis.fast_retransmission \
-      -e tcp.analysis.out_of_order -e tcp.analysis.lost_segment \
-      -e data.data \
-      > "$RAW_CSV"
+      echo "    $run_type: Extracting fields with thark..."
+      # Convert pcap to csv using thsark to extract following for timestamp analysis
+      tshark -n -r "$PCAP_IN" \
+        -T fields -E header=y -E separator=, -E quote=d \
+        -o tcp.desegment_tcp_streams:FALSE \
+        -o ip.defragment:FALSE -o ipv6.defragment:FALSE \
+        -o tcp.check_checksum:FALSE \
+        -e frame.time_epoch -e frame.number \
+        -e tcp.stream -e tcp.seq -e tcp.len \
+        -e tcp.analysis.retransmission -e tcp.analysis.fast_retransmission \
+        -e tcp.analysis.out_of_order -e tcp.analysis.lost_segment \
+        -e data.data \
+        > "$RAW_CSV"
 
-    echo "    Parsing p4sta timestamps..."
-    # Run parse-p4sta-timestamps.py to extract timestamps from tcp payload
-    # payload -> extract first 48 bit timestamp by finding signature 0x0f in tcp options, then extacting 48 bit
-    python3 parse-p4sta-timestamps.py "$RAW_CSV" "$PARSED_CSV" "$RUN_NAME" "$run_num"
-    # Resulting csv contains: run_name,run_num,stream_id,tcp_len,p4_timestamp_ns
+      echo "    $run_type: Parsing p4sta timestamps..."
+      # Run parse-p4sta-timestamps.py to extract timestamps from tcp payload
+      # payload -> extract first 48 bit timestamp by finding signature 0x0f in tcp options, then extacting 48 bit
+      python3 parse-p4sta-timestamps.py "$RAW_CSV" "$PARSED_CSV" "$RUN_NAME" "$run_num"
+      # Resulting csv contains: run_name,run_num,stream_id,tcp_len,p4_timestamp_ns
 
-    # Ensure packets are sorted (column 5 has timestamp)
-    { head -n1 "$PARSED_CSV"; tail -n +2 "$PARSED_CSV" | LC_ALL=C sort -t, -k5,5n; } > "$PARSED_CSV.sorted"
-    mv "$PARSED_CSV.sorted" "$PARSED_CSV"
+      # Ensure packets are sorted (column 5 has timestamp)
+      { head -n1 "$PARSED_CSV"; tail -n +2 "$PARSED_CSV" | LC_ALL=C sort -t, -k5,5n; } > "$PARSED_CSV.sorted"
+      mv "$PARSED_CSV.sorted" "$PARSED_CSV"
 
-    tail -n +2 "$PARSED_CSV" >> "$PACKETS_CSV"
+      tail -n +2 "$PARSED_CSV" >> "$PACKETS_CSV"
 
-    echo "    Extract metrics and rtts from logs..."
-    # Run metrics.py to use .tmp csv and other logs/counters to generate metrics.csv
-    python3 metrics.py "$RUN_PATH" "$RAW_CSV" "$METRICS_ROW" "$RUN_NAME" "$run_num"
+      echo "    $run_type: Extract metrics and rtts from logs..."
+      # Run metrics.py to use .tmp csv and other logs/counters to generate metrics.csv
+      python3 metrics.py "$RUN_PATH" "$RAW_CSV" "$METRICS_ROW" "$RUN_NAME" "$run_num"
 
-    tail -n +2 "$METRICS_ROW" >> "$METRICS_CSV"
+      tail -n +2 "$METRICS_ROW" >> "$METRICS_CSV"
 
-    # Run rrt.py to use 'server_iperf_client.json' to generate an array of RTTS over time
-    #  (adds to aggreagte json)
-    python3 rtt.py "$RUN_PATH/server_iperf_client.json" "$RTT_JSON"
-  done
+      # Run rrt.py to use 'server_iperf_client.json' to generate an array of RTTS over time
+      #  (adds to aggreagte json)
+      python3 rtt.py "$RUN_PATH/server_iperf_client.json" "$RTT_JSON"
+    done
+  ) &
 done
+
+wait
 
 echo ""
 echo "==================================================="
