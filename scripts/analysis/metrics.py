@@ -5,16 +5,19 @@ import sys
 from pathlib import Path
 
 
-def parse_iperf_throughput(run_path: Path):
+def parse_iperf_throughput_cpu(run_path: Path):
     path = run_path / "server_iperf_client.json"
     if not path.exists():
-        return -1
+        return -1, -1, -1
 
     try:
         data = json.loads(path.read_text())
-        return data["end"]["sum_received"]["bits_per_second"]
+        throughput = data["end"]["sum_received"]["bits_per_second"]
+        cpu_s = data["end"]["cpu_utilization_percent"]["host_total"]
+        cpu_r = data["end"]["cpu_utilization_percent"]["remote_total"]
+        return throughput, cpu_s, cpu_r
     except Exception:
-        return -1
+        return -1, -1, -1
 
 
 def count_tshark_flags(raw_csv_path: Path):
@@ -124,7 +127,7 @@ def main():
     run_name = sys.argv[4]
     run_num = sys.argv[5]
 
-    throughput_bps = parse_iperf_throughput(run_path)
+    throughput_bps, cpu_s, cpu_r = parse_iperf_throughput_cpu(run_path)
 
     retransmissions, fast_retransmissions, out_of_order, lost_segments = count_tshark_flags(raw_csv_path)
 
@@ -140,9 +143,10 @@ def main():
     client_ifb_after = parse_tc_drops(run_path / "client_tc_ifb0_after.txt")
     client_ifb_drops = diff_or_minus_one(client_ifb_before, client_ifb_after)
 
-    external_before = parse_iplink_total_drops(run_path / "external_iplink_before.txt")
-    external_after = parse_iplink_total_drops(run_path / "external_iplink_after.txt")
-    external_drops = diff_or_minus_one(external_before, external_after)
+    # external_before = parse_iplink_total_drops(run_path / "external_iplink_before.txt")
+    # external_after = parse_iplink_total_drops(run_path / "external_iplink_after.txt")
+    # external_drops = diff_or_minus_one(external_before, external_after)
+    external_drops = -1
 
     dumpcap_log = find_dumpcap_log(run_path)
     dumpcap_drops = parse_dumpcap_drops(dumpcap_log) if dumpcap_log else -1
@@ -150,15 +154,15 @@ def main():
     with open(out_csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "run_name", "run_num", "throughput_bps", "retransmissions", 
-            "fast_retransmissions", "out_of_order", "lost_segments", 
-            "server_drops", "client_drops", "client_ifb_drops", 
+            "run_name", "run_num", "throughput_bps", "cpu_sender", "cpu_receiver"
+            "retransmissions", "fast_retransmissions", "out_of_order", 
+            "lost_segments", "server_drops", "client_drops", "client_ifb_drops", 
             "external_drops", "dumpcap_drops",
         ])
         writer.writerow([
-            run_name, run_num, throughput_bps, retransmissions, 
-            fast_retransmissions, out_of_order, lost_segments, 
-            server_drops, client_drops, client_ifb_drops, 
+            run_name, run_num, throughput_bps, cpu_s, cpu_r,
+            retransmissions, fast_retransmissions, out_of_order, 
+            lost_segments, server_drops, client_drops, client_ifb_drops, 
             external_drops, dumpcap_drops,
         ])
 
