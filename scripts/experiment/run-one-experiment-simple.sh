@@ -92,7 +92,7 @@ SERVER_DEV="enp2s0np0"
 CLIENT_DEV="enp1s0np0"
 
 USER="kevinm"
-CLIENT_SSH="$USER@$CLIENT_IP"
+CLIENT_SSH="$USER@172.16.5.201"
 
 SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 

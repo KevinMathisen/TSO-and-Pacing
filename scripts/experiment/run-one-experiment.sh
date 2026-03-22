@@ -100,15 +100,14 @@ save_external_stats() {
 
 SERVER_IP="10.111.0.1" # fleming
 CLIENT_IP="10.111.0.2" # munnin
-EXTERNAL_HOST_IP="172.16.5.150"
 
 SERVER_DEV="enp2s0np0"
 CLIENT_DEV="enp1s0np0"
 EXTERNAL_HOST_DEV="enp1s0np0"
 
 USER="kevinm"
-CLIENT_SSH="$USER@$CLIENT_IP"
-EXTERNAL_SSH="$USER@$EXTERNAL_HOST_IP"
+CLIENT_SSH="$USER@172.16.5.201"
+EXTERNAL_SSH="$USER@172.16.5.150"
 
 SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 
