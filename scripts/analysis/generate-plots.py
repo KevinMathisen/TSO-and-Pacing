@@ -35,10 +35,10 @@ COLORS = {
 
 plt.rcParams.update({
     "axes.titlesize": 20,
-    "axes.labelsize": 16,
-    "legend.fontsize": 16,
-    "xtick.labelsize": 14,
-    "ytick.labelsize": 14,
+    "axes.labelsize": 20,
+    "legend.fontsize": 20,
+    "xtick.labelsize": 17,
+    "ytick.labelsize": 17,
 })
 
 def packet_times_s(df: pd.DataFrame) -> np.ndarray:
@@ -124,6 +124,8 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
     metrics = pd.read_csv(sol_dir / "metrics.csv")
     with open(sol_dir / "rtt.json", "r") as f:
         rtts = json.load(f)
+    with open(sol_dir / "qlen.json", "r") as f:
+        qlens = json.load(f)
 
     packets["run_num"] = pd.to_numeric(packets["run_num"])
     packets["stream_id"] = pd.to_numeric(packets["stream_id"])
@@ -148,6 +150,14 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
 
     rtts = np.array(rtts, dtype=np.float64)
 
+    # to plot cdf, we want qlengths as array of each occured value
+    if qlens:
+        qlen_lengths = [int(k) for k in qlens.keys()]
+        qlen_counts = [int(v) for v in qlens.values()]
+        qlens = np.repeat(qlen_lengths, qlen_counts)
+    else:
+        qlens = np.array([])
+
     return {
         "setup": setup,
         "solution": solution,
@@ -157,6 +167,7 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
         "packets": packets,
         "metrics": metrics,
         "rtts": rtts,
+        "qlens": qlens,
     }
 
 
@@ -280,13 +291,6 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
     ax_sender.grid(True, axis="y", linestyle="--", alpha=0.5)
     ax_receiver.grid(True, axis="y", linestyle="--", alpha=0.5)
 
-    ax = plt.gca()
-    if setup in ["direct-link_fq", "direct-link_fq_codel", "datacenter_fq"]:
-        plt.ylim(bottom=0)
-        ax.xaxis.set_major_locator(mticker.MultipleLocator(0.5))
-    elif setup == "internet_fq":
-        plt.ylim(bottom=50)
-
     # no legend needed
     _save_close(fig, out_path)
 
@@ -309,10 +313,8 @@ def plot_rtt_boxplot(solutions: list[dict], setup: str, out_path: Path):
     for median in bp["medians"]:
         median.set_color("black")
 
-    ax = plt.gca()
     if setup in ["direct-link_fq", "direct-link_fq_codel", "datacenter_fq"]:
         plt.ylim(bottom=0)
-        ax.xaxis.set_major_locator(mticker.MultipleLocator(0.5))
     elif setup == "internet_fq":
         plt.ylim(bottom=50)
 
@@ -341,7 +343,7 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
         x_ms = (x - float(x[0])) * 1000.0
         y = df["bin_packets"].to_numpy()
 
-        mask = x_ms >= x_start and x_ms <= x_end
+        mask = (x_ms >= x_start) & (x_ms <= x_end)
         x_ms = x_ms[mask]
         y = y[mask]
         
@@ -443,6 +445,13 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
         xlabel="Inter-departure time across all flows in run (µs)",
         out_path=setup_dir / "aggregate_idt_cdf.png",
     )
+
+    if len(solutions[0]["qlens"]) > 0:
+        plot_cdf(
+            solutions, setup, "qlens",
+            xlabel="FQ/pacing IFB queue length",
+            out_path=setup_dir / "qlens_cdf.png",
+        )
 
 
 def main():
