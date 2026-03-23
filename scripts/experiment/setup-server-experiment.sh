@@ -22,10 +22,10 @@ for arg in "$@"; do
     --no-tso)       TREATMENT=1 ;;
     --tso)          TREATMENT=2 ;;
     --tso-pacing)   TREATMENT=3 ;;
-    --direct-link)   CONNECTION_MODE="direct-link"; CCA="cubic" ;;
-    --internet)      CONNECTION_MODE="internet"; CCA="cubic" ;;
-    --datacenter)    CONNECTION_MODE="datacenter"; CCA="dctcp" ;;
-    --datacenter-hc) CONNECTION_MODE="datacenter-high-contention"; CCA="dctcp" ;;
+    --direct-link)   CONNECTION_MODE="direct-link" ;;
+    --internet)      CONNECTION_MODE="internet" ;;
+    --datacenter)    CONNECTION_MODE="datacenter" ;;
+    --datacenter-hc) CONNECTION_MODE="datacenter-high-contention" ;;
     --fq)           QDISC="fq" ;;
     --fq-codel)     QDISC="fq_codel" ;;
     --help)         echo " usage (--help --no-tso --tso --tso-pacing --direct-link --internet --datacenter --datacenter-hc --fq --fq-codel)"; exit 0 ;;

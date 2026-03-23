@@ -47,8 +47,8 @@ fi
 
 # Does not provide us with that much useful data, but is interesting to see that we dont always show benefit
 if [ "$CONNECTION_MODE" = "internet" ]; then 
-    # egress 50 ms delay
-    tc qdisc replace dev $DEV root netem delay 50ms limit 5000
+    # egress 20 ms delay
+    tc qdisc replace dev $DEV root netem delay 20ms limit 5000
 
     # ---- ingress 2 Gbps ---- 
 
@@ -58,7 +58,7 @@ if [ "$CONNECTION_MODE" = "internet" ]; then
       maxrate 500mbit \
       limit 3000 flow_limit 3000
 
-    echo "Interface $DEV configured with Internet (50 ms RTT, 1 Gbps)"
+    echo "Interface $DEV configured with Internet (20 ms RTT, 1 Gbps)"
 
 elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-high-contention" ]]; then
     # egress no delay
@@ -69,18 +69,15 @@ elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-hi
     # 1 Gbps per flow -> 4 Gbps total
     # Max 3000 pkts -> 3000*1500 B = 4.5 MB buffer
     tc qdisc replace dev ifb0 root fq \
-      maxrate 1gbit ce_threshold 40us \
+      maxrate 1gbit \
       limit 3000 flow_limit 3000
 
     if [ "$CONNECTION_MODE" = "datacenter-high-contention" ]; then
       # Max 200 pkts -> 200*1500 B = 300 kB buffer
       tc qdisc replace dev ifb0 root fq \
-        maxrate 1gbit ce_threshold 40us \
+        maxrate 1gbit \
         limit 200 flow_limit 200
     fi
-
-    sysctl -w net.ipv4.tcp_congestion_control=dctcp
-    sysctl -w net.ipv4.tcp_ecn=1
 
     echo "Interface $DEV configured with Datacenter (no delay, 8 Gbps)"
 
