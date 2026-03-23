@@ -32,8 +32,8 @@ echo "Placing metrics and data in $RUN_DIR"
 
 echo ""
 echo "Retrieving logs and packet captures from $SERVER:$SERVER_DIR..."
-# Assume server only has directories we need
-scp -r "$SERVER:$SERVER_DIR/" "$DUMP_DIR/"
+# Assume server only has directories we need, so copy all!
+ssh "$SERVER" "cd $SERVER_DIR && tar -czf - ." | tar -xzf - -C "$DUMP_DIR/"
 
 # For each of the predefined combinations
 RUN_TYPES=(
@@ -65,11 +65,13 @@ for run_type in "${RUN_TYPES[@]}"; do
     PACKETS_CSV="$OUT_DIR/packets.csv"
     METRICS_CSV="$OUT_DIR/metrics.csv"
     RTT_JSON="$OUT_DIR/rtt.json"
+    QLEN_JSON="$OUT_DIR/qlen.json"
 
     # initial aggregate files for run type
     echo 'run_name,run_num,stream_id,tcp_len,p4_timestamp_ns,p4_timestamp_prev_ns' > "$PACKETS_CSV"
     echo 'run_name,run_num,throughput_bps,cpu_sender,cpu_receiver,retransmissions,fast_retransmissions,out_of_order,lost_segments,server_drops,client_drops,client_ifb_drops,external_drops,dumpcap_drops' > "$METRICS_CSV"
     echo '[]' > "$RTT_JSON"
+    echo '{}' > "$QLEN_JSON"
 
     for (( run_num=1; run_num<=RUNS_NUM; run_num++ )); do
       echo "  $run_type: Run $run_num"
@@ -87,7 +89,6 @@ for run_type in "${RUN_TYPES[@]}"; do
       PARSED_CSV="$TMP_DIR/packets_parsed.csv"
       METRICS_ROW="$TMP_DIR/metrics_row.csv"
 
-      echo "    $run_type: Extracting fields with thark..."
       # Convert pcap to csv using thsark to extract following for timestamp analysis
       tshark -n -r "$PCAP_IN" \
         -T fields -E header=y -E separator=, -E quote=d \
@@ -101,7 +102,6 @@ for run_type in "${RUN_TYPES[@]}"; do
         -e data.data \
         > "$RAW_CSV"
 
-      echo "    $run_type: Parsing p4sta timestamps..."
       # Run parse-p4sta-timestamps.py to extract timestamps from tcp payload
       # payload -> extract first 48 bit timestamp by finding signature 0x0f in tcp options, then extacting 48 bit
       python3 parse-p4sta-timestamps.py "$RAW_CSV" "$PARSED_CSV" "$RUN_NAME" "$run_num"
@@ -113,9 +113,8 @@ for run_type in "${RUN_TYPES[@]}"; do
 
       tail -n +2 "$PARSED_CSV" >> "$PACKETS_CSV"
 
-      echo "    $run_type: Extract metrics and rtts from logs..."
       # Run metrics.py to use .tmp csv and other logs/counters to generate metrics.csv
-      python3 metrics.py "$RUN_PATH" "$RAW_CSV" "$METRICS_ROW" "$RUN_NAME" "$run_num"
+      python3 metrics.py "$RUN_PATH" "$RAW_CSV" "$METRICS_ROW" "$RUN_NAME" "$run_num" "$QLEN_JSON"
 
       tail -n +2 "$METRICS_ROW" >> "$METRICS_CSV"
 
