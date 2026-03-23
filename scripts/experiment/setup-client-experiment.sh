@@ -53,10 +53,10 @@ if [ "$CONNECTION_MODE" = "internet" ]; then
     # ---- ingress 2 Gbps ---- 
 
     # 500 Mbps per flow -> 2 Gbps total
-    # Max 10000 pkts -> 10000*1500 B = 15 MB buffer
+    # Max 3000 pkts -> 3000*1500 B = 4.5 MB buffer
     tc qdisc replace dev ifb0 root fq \
       maxrate 500mbit \
-      limit 10000 flow_limit 10000
+      limit 3000 flow_limit 3000
 
     echo "Interface $DEV configured with Internet (50 ms RTT, 1 Gbps)"
 
@@ -69,13 +69,13 @@ elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-hi
     # 1 Gbps per flow -> 4 Gbps total
     # Max 3000 pkts -> 3000*1500 B = 4.5 MB buffer
     tc qdisc replace dev ifb0 root fq \
-      maxrate 1gbit ce_threshold 90us \
+      maxrate 1gbit ce_threshold 40us \
       limit 3000 flow_limit 3000
 
     if [ "$CONNECTION_MODE" = "datacenter-high-contention" ]; then
       # Max 200 pkts -> 200*1500 B = 300 kB buffer
       tc qdisc replace dev ifb0 root fq \
-        maxrate 1gbit ce_threshold 90us \
+        maxrate 1gbit ce_threshold 40us \
         limit 200 flow_limit 200
     fi
 
