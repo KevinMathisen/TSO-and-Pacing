@@ -122,7 +122,7 @@ CAPTURE_FILTER="tcp and src host $SERVER_IP and dst host $CLIENT_IP and dst port
 RUN_NUM=""
 TREATMENT=""
 CONNECTION_MODE=""
-FLOWS=0 # direct-link -> 2 flows, internet -> 4 flows, datacenter -> 4 flows
+FLOWS=4 # direct-link -> 4 flows, internet -> 4 flows, datacenter -> 4 flows
 QDISC=""
 
 while [[ $# -gt 0 ]]; do
@@ -132,10 +132,10 @@ while [[ $# -gt 0 ]]; do
     --no-tso)       TREATMENT="no-tso"; shift ;;
     --tso)          TREATMENT="tso"; shift ;;
     --tso-pacing)   TREATMENT="tso-pacing"; shift ;;
-    --direct-link)  CONNECTION_MODE="direct-link"; FLOWS=4; shift ;;
-    --internet)     CONNECTION_MODE="internet"; FLOWS=4; shift ;;
-    --datacenter)   CONNECTION_MODE="datacenter"; FLOWS=4; shift ;;
-    --datacenter-hc) CONNECTION_MODE="datacenter-hc"; FLOWS=4; shift ;;
+    --direct-link)  CONNECTION_MODE="direct-link"; shift ;;
+    --internet)     CONNECTION_MODE="internet"; shift ;;
+    --datacenter)   CONNECTION_MODE="datacenter"; shift ;;
+    --datacenter-hc) CONNECTION_MODE="datacenter-hc"; shift ;;
     --fq)           QDISC="fq"; shift ;;
     --fq-codel)     QDISC="fq_codel"; shift ;;
     --help)
