@@ -37,7 +37,7 @@ run_setup () {
 }
 
 # run experiments for all connection modes (all with fq)
-MODES=(--direct-link --internet --datacenter --datacenter-hc)
+MODES=(--direct-link --internet --datacenter)
 
 for mode in "${MODES[@]}"; do
   run_setup "$mode" --fq "--$TREATMENT"
