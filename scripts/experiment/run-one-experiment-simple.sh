@@ -208,7 +208,7 @@ echo ""
 echo "Starting pcap on CLIENT"
 CAPTURE_OUT="capture_${RUN_NAME}.pcapng"
 
-ssh "$CLIENT_SSH" "sudo dumpcap -q -i $CLIENT_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 96 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
+ssh "$CLIENT_SSH" "sudo dumpcap -q -i $CLIENT_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 128 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
 
 
 # Wait until everything done
