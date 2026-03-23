@@ -10,7 +10,7 @@ DEV="enp2s0np0"
 # 1 = no TSO, 2 = TSO, 3 = TSO + our solution
 TREATMENT=1
 
-CONNECTION_MODE="direct-link"  # direct-link, internet, datacenter, or datacenter-high-contention 
+CONNECTION_MODE="direct-link"  # direct-link, internet, datacenter
 # direct-link -> 2 flows, internet -> 4 flows, datacenter -> 4 flows
 
 CCA="cubic" # cubic, dctcp, bbr
@@ -25,11 +25,10 @@ for arg in "$@"; do
     --direct-link)   CONNECTION_MODE="direct-link" ;;
     --internet)      CONNECTION_MODE="internet" ;;
     --datacenter)    CONNECTION_MODE="datacenter" ;;
-    --datacenter-hc) CONNECTION_MODE="datacenter-high-contention" ;;
     --fq)           QDISC="fq" ;;
     --fq-codel)     QDISC="fq_codel" ;;
-    --help)         echo " usage (--help --no-tso --tso --tso-pacing --direct-link --internet --datacenter --datacenter-hc --fq --fq-codel)"; exit 0 ;;
-    *) echo "Unknown argument: $arg, usage (--help --no-tso --tso --tso-pacing --direct-link --internet --datacenter --datacenter-hc --fq --fq-codel)"; exit 1 ;;
+    --help)         echo " usage (--help --no-tso --tso --tso-pacing --direct-link --internet --datacenter --fq --fq-codel)"; exit 0 ;;
+    *) echo "Unknown argument: $arg, usage (--help --no-tso --tso --tso-pacing --direct-link --internet --datacenter --fq --fq-codel)"; exit 1 ;;
   esac
 done
 
@@ -57,8 +56,8 @@ tc qdisc replace dev "$DEV" root "$QDISC"
 if [ "$CONNECTION_MODE" = "internet" ]; then 
     echo "Configured for Internet (cubic)"
 
-elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-high-contention" ]]; then
-    echo "Configured for Datacenter (dctcp + ecn)"
+elif [[ "$CONNECTION_MODE" = "datacenter" ]]; then
+    echo "Configured for Datacenter (cubic)"
 
 else 
     echo "Configured for Direct-link (cubic)"

@@ -51,7 +51,6 @@ setup_server() {
     direct-link) mode_flag="--direct-link" ;;
     internet) mode_flag="--internet" ;;
     datacenter) mode_flag="--datacenter" ;;
-    datacenter-hc) mode_flag="--datacenter-hc" ;;
   esac
   case "$QDISC" in
     fq) qdisc_flag="--fq" ;;
@@ -67,7 +66,6 @@ setup_client() {
     direct-link) mode_flag="--direct-link" ;;
     internet) mode_flag="--internet" ;;
     datacenter) mode_flag="--datacenter" ;;
-    datacenter-hc) mode_flag="--datacenter-hc" ;;
   esac
 
   ssh -o BatchMode=yes "$CLIENT_SSH" "sudo $SCRIPT_PATH/setup-client-experiment.sh $mode_flag"
@@ -135,11 +133,10 @@ while [[ $# -gt 0 ]]; do
     --direct-link)  CONNECTION_MODE="direct-link"; shift ;;
     --internet)     CONNECTION_MODE="internet"; shift ;;
     --datacenter)   CONNECTION_MODE="datacenter"; shift ;;
-    --datacenter-hc) CONNECTION_MODE="datacenter-hc"; shift ;;
     --fq)           QDISC="fq"; shift ;;
     --fq-codel)     QDISC="fq_codel"; shift ;;
     --help)
-      echo "usage: $0 --run-num N (--no-tso|--tso|--tso-pacing) (--direct-link|--internet|--datacenter|--datacenter-hc) (--fq|--fq-codel)"
+      echo "usage: $0 --run-num N (--no-tso|--tso|--tso-pacing) (--direct-link|--internet|--datacenter) (--fq|--fq-codel)"
       exit 0 ;;
     *)
       echo "Unknown argument: $1"; exit 1 ;;

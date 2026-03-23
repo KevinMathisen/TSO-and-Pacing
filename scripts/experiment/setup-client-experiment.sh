@@ -7,16 +7,15 @@ if (( EUID != 0 )); then
 fi
 
 DEV="enp1s0np0"
-CONNECTION_MODE="direct-link"  # direct-link, internet, datacenter, or datacenter-high-contention 
+CONNECTION_MODE="direct-link"  # direct-link, internet, datacenter
 
 for arg in "$@"; do
   case "$arg" in
     --direct-link)   CONNECTION_MODE="direct-link" ;;
     --internet)      CONNECTION_MODE="internet" ;;
     --datacenter)    CONNECTION_MODE="datacenter" ;;
-    --datacenter-hc) CONNECTION_MODE="datacenter-high-contention" ;;
-    --help)         echo " usage (--help --direct-link --internet --datacenter --datacenter-hc)"; exit 0 ;;
-    *) echo "Unknown argument: $arg, usage (--help --direct-link --internet --datacenter --datacenter-hc)"; exit 1 ;;
+    --help)         echo " usage (--help --direct-link --internet --datacenter)"; exit 0 ;;
+    *) echo "Unknown argument: $arg, usage (--help --direct-link --internet --datacenter)"; exit 1 ;;
   esac
 done
 
@@ -60,7 +59,7 @@ if [ "$CONNECTION_MODE" = "internet" ]; then
 
     echo "Interface $DEV configured with Internet (20 ms RTT, 1 Gbps)"
 
-elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-high-contention" ]]; then
+elif [[ "$CONNECTION_MODE" = "datacenter" ]]; then
     # egress no delay
     # ...
 
@@ -71,13 +70,6 @@ elif [[ "$CONNECTION_MODE" = "datacenter" || "$CONNECTION_MODE" = "datacenter-hi
     tc qdisc replace dev ifb0 root fq \
       maxrate 1gbit \
       limit 3000 flow_limit 3000
-
-    if [ "$CONNECTION_MODE" = "datacenter-high-contention" ]; then
-      # Max 200 pkts -> 200*1500 B = 300 kB buffer
-      tc qdisc replace dev ifb0 root fq \
-        maxrate 1gbit \
-        limit 200 flow_limit 200
-    fi
 
     echo "Interface $DEV configured with Datacenter (no delay, 8 Gbps)"
 
