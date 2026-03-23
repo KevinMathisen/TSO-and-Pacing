@@ -13,13 +13,13 @@ import matplotlib.ticker as mticker
 MICRO_BIN_US = 40
 FIRST_FLOW_TIMESERIES_MS = 10
 
-# SETUPS = [
-#     "direct-link_fq",
-#     "datacenter_fq",
-#     "internet_fq",
-#     "direct-link_fq_codel",
-# ]
-SETUPS = ["datacenter_fq"]
+SETUPS = [
+    "direct-link_fq",
+    "datacenter_fq",
+    "internet_fq",
+    "direct-link_fq_codel",
+]
+# SETUPS = ["datacenter_fq"]
 
 SOLUTIONS = {
     "no-tso": "No TSO",
