@@ -35,10 +35,10 @@ COLORS = {
 
 plt.rcParams.update({
     "axes.titlesize": 20,
-    "axes.labelsize": 20,
-    "legend.fontsize": 20,
-    "xtick.labelsize": 17,
-    "ytick.labelsize": 17,
+    "axes.labelsize": 22,
+    "legend.fontsize": 22,
+    "xtick.labelsize": 20,
+    "ytick.labelsize": 19,
 })
 
 def packet_times_s(df: pd.DataFrame) -> np.ndarray:
@@ -124,8 +124,9 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
     metrics = pd.read_csv(sol_dir / "metrics.csv")
     with open(sol_dir / "rtt.json", "r") as f:
         rtts = json.load(f)
-    with open(sol_dir / "qlen.json", "r") as f:
-        qlens = json.load(f)
+    # with open(sol_dir / "qlen.json", "r") as f:
+    #     qlens = json.load(f)
+    qlens = {}
 
     packets["run_num"] = pd.to_numeric(packets["run_num"])
     packets["stream_id"] = pd.to_numeric(packets["stream_id"])
@@ -218,36 +219,65 @@ def cdf_xy(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def _save_close(fig, path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
-    fig.savefig(path, dpi=300)
+    fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
+def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path: Path):
+    fig, (ax_thr, ax_rtt) = plt.subplots(1, 2, figsize=(10, 6), sharex=True)
 
-def plot_throughput_boxplot(solutions: list[dict], setup: str, out_path: Path):
-    fig = plt.figure(figsize=(8, 6))
+    labels = [sol["label"] for sol in solutions]
+    positions = np.arange(1, len(solutions) + 1)
 
-    data = []
-    labels = []
-    for sol in solutions:
-        data.append(sol["throughput_bps"] / 1e9)  # bps -> Gbps
-        labels.append(sol["label"])
+    # throughput
+    thr_data = [(sol["throughput_bps"] / 1e9) for sol in solutions]
+    bp_thr = ax_thr.boxplot(
+        thr_data,
+        positions=positions,
+        widths=0.6,
+        patch_artist=True,
+        labels=labels,
+    )
 
-    bp = plt.boxplot(data, patch_artist=True, labels=labels, widths=0.6)
+    for i, sol in enumerate(solutions):
+        bp_thr["boxes"][i].set_facecolor(sol["color"])
+        bp_thr["boxes"][i].set_alpha(1)
+    for med in bp_thr["medians"]:
+        med.set_color("black")
 
-    for patch, sol in zip(bp["boxes"], solutions):
-        patch.set_facecolor(sol["color"])
-        patch.set_alpha(1)
+    ax_thr.set_title("Throughput")
+    ax_thr.set_ylabel("Throughput (Gbps)")
+    ax_thr.grid(True, axis="y", linestyle="--", alpha=0.5)
 
-    for median in bp["medians"]:
-        median.set_color("black")
+    # RTT
+    rtt_data = [(sol["rtts"] / 1000.0) for sol in solutions]  # us -> ms
+    bp_rtt = ax_rtt.boxplot(
+        rtt_data,
+        positions=positions,
+        widths=0.6,
+        patch_artist=True,
+        labels=labels,
+    )
 
-    plt.ylabel("Throughput (Gbps)")
-    # plt.title("Throughput distribution")
-    plt.grid(True, axis="y", linestyle="--", alpha=0.5)
+    for i, sol in enumerate(solutions):
+        bp_rtt["boxes"][i].set_facecolor(sol["color"])
+        bp_rtt["boxes"][i].set_alpha(1)
+    for med in bp_rtt["medians"]:
+        med.set_color("black")
+
+    ax_rtt.set_title("RTT")
+    ax_rtt.set_ylabel("RTT (ms)")
+
+    if setup in ["direct-link_fq", "direct-link_fq_codel", "datacenter_fq"]:
+        ax_rtt.set_ylim(bottom=0)
+    elif setup == "internet_fq":
+        ax_rtt.set_ylim(bottom=50)
+
+    ax_rtt.grid(True, axis="y", linestyle="--", alpha=0.5)
 
     _save_close(fig, out_path)
 
 def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
-    fig, (ax_sender, ax_receiver) = plt.subplots(1, 2, figsize=(11, 6), sharex=True)
+    fig, (ax_sender, ax_receiver) = plt.subplots(1, 2, figsize=(10, 6), sharex=True)
 
     labels = [sol["label"] for sol in solutions]
     positions = np.arange(1, len(solutions) + 1)
@@ -295,37 +325,6 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
     _save_close(fig, out_path)
 
 
-def plot_rtt_boxplot(solutions: list[dict], setup: str, out_path: Path):
-    fig = plt.figure(figsize=(8, 6))
-
-    data = []
-    labels = []
-    for sol in solutions:
-        data.append(sol["rtts"] / 1000.0) # us to ms
-        labels.append(sol["label"])
-
-    bp = plt.boxplot(data, patch_artist=True, labels=labels, widths=0.6)
-
-    for patch, sol in zip(bp["boxes"], solutions):
-        patch.set_facecolor(sol["color"])
-        patch.set_alpha(1)
-
-    for median in bp["medians"]:
-        median.set_color("black")
-
-    if setup in ["direct-link_fq", "direct-link_fq_codel", "datacenter_fq"]:
-        plt.ylim(bottom=0)
-    elif setup == "internet_fq":
-        plt.ylim(bottom=50)
-
-
-    plt.ylabel("RTT (ms)")
-    # plt.title("RTT distribution")
-    plt.grid(True, axis="y", linestyle="--", alpha=0.5)
-
-    _save_close(fig, out_path)
-
-
 def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path):
     fig = plt.figure(figsize=(10, 6))
 
@@ -357,7 +356,7 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
     ax = plt.gca()
     ax.xaxis.set_major_locator(mticker.MultipleLocator(1))
     ax.yaxis.set_major_locator(mticker.MultipleLocator(10))
-    ax.yaxis.set_minor_locator(mticker.MultipleLocator(2))
+    ax.yaxis.set_minor_locator(mticker.MultipleLocator(5))
 
     ax.minorticks_on()
     ax.xaxis.set_minor_locator(mp.ticker.NullLocator())
@@ -365,12 +364,12 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
     ax.grid(True, which="minor", axis="y", alpha=0.35, linestyle="--", linewidth=0.5)
 
     ax.yaxis.set_minor_formatter(mp.ticker.FormatStrFormatter('%d'))
-    ax.tick_params(axis="y", which="minor", length=3, width=0.8, labelsize=12)
-    ax.tick_params(axis="y", which="major", length=6, width=1.0, labelsize=14)
-    ax.tick_params(axis="x", which="major", length=6, width=1.0, labelsize=14)
+    ax.tick_params(axis="y", which="minor", length=3, width=0.8, labelsize=16)
+    ax.tick_params(axis="y", which="major", length=6, width=1.0, labelsize=18)
+    ax.tick_params(axis="x", which="major", length=6, width=1.0, labelsize=18)
     ax.tick_params(axis="y", which="both", right=True, labelright=False)
 
-    plt.ylim(0, 35)
+    plt.ylim(0, 35.1)
     plt.xlim(x_start, x_end)
 
     plt.xlabel("Time elapsed (ms)")
@@ -414,14 +413,9 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     setup_dir = plots_dir / setup
     setup_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_throughput_boxplot(
+    plot_throughput_and_rtt_boxplots(
         solutions, setup,
-        setup_dir / "throughput_boxplot.png",
-    )
-
-    plot_rtt_boxplot(
-        solutions, setup,
-        setup_dir / "rtt_boxplot.png",
+        setup_dir / "throughput_rtt_boxplots.png",
     )
 
     plot_cpu_boxplot(
