@@ -1,2 +1,3 @@
 scripts/dev-testing/test-data/*
+scripts/analysis/*/*
 *.pcapng
