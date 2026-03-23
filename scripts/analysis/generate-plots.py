@@ -13,13 +13,13 @@ import matplotlib.ticker as mticker
 MICRO_BIN_US = 40
 FIRST_FLOW_TIMESERIES_MS = 10
 
-SETUPS = [
-    "direct-link_fq",
-    "datacenter_fq",
-    "internet_fq",
-    "direct-link_fq_codel",
-]
-# SETUPS = ["datacenter_fq"]
+# SETUPS = [
+#     "direct-link_fq",
+#     "datacenter_fq",
+#     "internet_fq",
+#     "direct-link_fq_codel",
+# ]
+SETUPS = ["datacenter_fq"]
 
 SOLUTIONS = {
     "no-tso": "No TSO",
@@ -35,10 +35,10 @@ COLORS = {
 
 plt.rcParams.update({
     "axes.titlesize": 20,
-    "axes.labelsize": 22,
-    "legend.fontsize": 22,
-    "xtick.labelsize": 20,
-    "ytick.labelsize": 19,
+    "axes.labelsize": 26,
+    "legend.fontsize": 26,
+    "xtick.labelsize": 23,
+    "ytick.labelsize": 21,
 })
 
 def packet_times_s(df: pd.DataFrame) -> np.ndarray:
@@ -126,9 +126,8 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
         rtts = json.load(f)
     with open(sol_dir / "throughput.json", "r") as f:
         throughputs = json.load(f)
-    # with open(sol_dir / "qlen.json", "r") as f:
-    #     qlens = json.load(f)
-    qlens = {}
+    with open(sol_dir / "qlen.json", "r") as f:
+        qlens = json.load(f)
 
     packets["run_num"] = pd.to_numeric(packets["run_num"])
     packets["stream_id"] = pd.to_numeric(packets["stream_id"])
@@ -226,7 +225,7 @@ def _save_close(fig, path: Path):
     plt.close(fig)
 
 def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path: Path):
-    fig, (ax_thr, ax_rtt) = plt.subplots(1, 2, figsize=(10, 6), sharex=True)
+    fig, (ax_thr, ax_rtt) = plt.subplots(1, 2, figsize=(8, 6), sharex=True)
 
     labels = [sol["label"] for sol in solutions]
     positions = np.arange(1, len(solutions) + 1)
@@ -280,7 +279,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     _save_close(fig, out_path)
 
 def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
-    fig, (ax_sender, ax_receiver) = plt.subplots(1, 2, figsize=(10, 6), sharex=True)
+    fig, (ax_sender, ax_receiver) = plt.subplots(1, 2, figsize=(8, 6), sharex=True)
 
     labels = [sol["label"] for sol in solutions]
     positions = np.arange(1, len(solutions) + 1)
@@ -329,7 +328,7 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
 
 
 def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path):
-    fig = plt.figure(figsize=(10, 6))
+    fig = plt.figure(figsize=(8, 6))
 
     x_start, x_end = 0, FIRST_FLOW_TIMESERIES_MS
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
@@ -383,7 +382,7 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
     _save_close(fig, out_path)
 
 def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out_path: Path):
-    fig = plt.figure(figsize=(10, 6))
+    fig = plt.figure(figsize=(8, 6))
 
     for s in solutions:
         values = s[value_key]
