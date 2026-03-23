@@ -14,6 +14,7 @@ fi
 # ============== Ensure everything killed on exit function ===========
 CLIENT_IPERF_PID=""
 SERVER_IPERF_PID=""
+CLIENT_BPF_PID=""
 
 cleanup() {
   set +e
@@ -188,7 +189,7 @@ echo "Client iperf3 server pid: $CLIENT_IPERF_PID"
 if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
   echo ""
   echo "Starting bpftrace on CLIENT (for ifb0)"
-  CLIENT_BPF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'BPFTRACE_MAP_KEYS_MAX=65536 nohup bpftrace $SCRIPT_PATH/monitor_qlen.bt > /tmp/bpf_monitor_${RUN_NAME}.txt 2>&1 & echo \$!'")"
+  CLIENT_BPF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'BPFTRACE_MAP_KEYS_MAX=65536 nohup /home/kevinm/opt/bpftrace/squashfs-root/AppRun $SCRIPT_PATH/record_qlen_ifb.bt > /tmp/bpf_monitor_${RUN_NAME}.txt 2>&1 & echo \$!'")"
   echo "Client bpftrace pid: $CLIENT_BPF_PID"
 fi
 
