@@ -112,11 +112,35 @@ def find_dumpcap_log(run_path: Path):
         return None
     return matches[0]
 
+def find_bpf_log(run_path: Path):
+    matches = list(run_path.glob("bpf_monitor_*.log"))
+    if not matches:
+        return None
+    return matches[0]
+
+def update_queue_lengths(in_path: Path, out_json_path: Path):
+    try:
+        agg_data = {}
+        with open(out_json_path, 'r') as f:
+            agg_data = json.load(f)
+
+        with open(in_path, 'r') as f:
+            for line in f:
+                m = re.search(r"@qlen_counts\[(\d+)\]:\s*(\d+)", line)
+                if m:
+                    qlen = m.group(1)
+                    count = int(m.group(2))
+                    agg_data[qlen] = agg_data.get(qlen, 0) + count
+
+        with open(out_json_path, 'w') as f:
+            json.dump(agg_data, f)
+    except Exception:
+        pass
 
 def main():
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 7:
         print(
-            f"Usage: {sys.argv[0]} RUN_PATH RAW_CSV OUT_CSV RUN_NAME RUN_NUM",
+            f"Usage: {sys.argv[0]} RUN_PATH RAW_CSV OUT_CSV RUN_NAME RUN_NUM QLEN_JSON",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -126,6 +150,7 @@ def main():
     out_csv_path = Path(sys.argv[3])
     run_name = sys.argv[4]
     run_num = sys.argv[5]
+    qlen_json = Path(sys.argv[6])
 
     throughput_bps, cpu_s, cpu_r = parse_iperf_throughput_cpu(run_path)
 
@@ -150,6 +175,10 @@ def main():
 
     dumpcap_log = find_dumpcap_log(run_path)
     dumpcap_drops = parse_dumpcap_drops(dumpcap_log) if dumpcap_log else -1
+
+    bpf_log = find_bpf_log(run_path)
+    if bpf_log:
+        update_queue_lengths(bpf_log, qlen_json)
 
     with open(out_csv_path, "w", newline="") as f:
         writer = csv.writer(f)
