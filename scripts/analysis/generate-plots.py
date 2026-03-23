@@ -124,6 +124,8 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
     metrics = pd.read_csv(sol_dir / "metrics.csv")
     with open(sol_dir / "rtt.json", "r") as f:
         rtts = json.load(f)
+    with open(sol_dir / "throughput.json", "r") as f:
+        throughputs = json.load(f)
     # with open(sol_dir / "qlen.json", "r") as f:
     #     qlens = json.load(f)
     qlens = {}
@@ -150,6 +152,7 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
     metrics["cpu_receiver"] = pd.to_numeric(metrics["cpu_receiver"])
 
     rtts = np.array(rtts, dtype=np.float64)
+    throughputs = np.array(throughputs, dtype=np.float64)
 
     # to plot cdf, we want qlengths as array of each occured value
     if qlens:
@@ -168,6 +171,7 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
         "packets": packets,
         "metrics": metrics,
         "rtts": rtts,
+        "throughputs": throughputs,
         "qlens": qlens,
     }
 
@@ -176,7 +180,7 @@ def prepare_solution_data(solution_data: dict) -> dict:
     packets = solution_data["packets"]
     metrics = solution_data["metrics"]
 
-    throughput_bps = metrics["throughput_bps"].dropna().to_numpy(dtype=np.float64)
+    # throughput_bps = metrics["throughput_bps"].dropna().to_numpy(dtype=np.float64)
     cpu_sender = metrics["cpu_sender"].dropna().to_numpy(dtype=np.float64)
     cpu_receiver = metrics["cpu_receiver"].dropna().to_numpy(dtype=np.float64)
 
@@ -187,7 +191,6 @@ def prepare_solution_data(solution_data: dict) -> dict:
 
     return {
         **solution_data,
-        "throughput_bps": throughput_bps,
         "cpu_sender": cpu_sender,
         "cpu_receiver": cpu_receiver,
         "first_flow_timeseries": first_flow_timeseries,
@@ -229,7 +232,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     positions = np.arange(1, len(solutions) + 1)
 
     # throughput
-    thr_data = [(sol["throughput_bps"] / 1e9) for sol in solutions]
+    thr_data = [(sol["throughputs"] / 1e9) for sol in solutions]
     bp_thr = ax_thr.boxplot(
         thr_data,
         positions=positions,

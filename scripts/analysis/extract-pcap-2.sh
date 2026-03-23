@@ -65,12 +65,14 @@ for run_type in "${RUN_TYPES[@]}"; do
     PACKETS_CSV="$OUT_DIR/packets.csv"
     METRICS_CSV="$OUT_DIR/metrics.csv"
     RTT_JSON="$OUT_DIR/rtt.json"
+    THROUGHPUT_JSON="$OUT_DIR/throughput.json"
     QLEN_JSON="$OUT_DIR/qlen.json"
 
     # initial aggregate files for run type
     echo 'run_name,run_num,stream_id,tcp_len,p4_timestamp_ns,p4_timestamp_prev_ns' > "$PACKETS_CSV"
     echo 'run_name,run_num,throughput_bps,cpu_sender,cpu_receiver,retransmissions,fast_retransmissions,out_of_order,lost_segments,server_drops,client_drops,client_ifb_drops,external_drops,dumpcap_drops' > "$METRICS_CSV"
     echo '[]' > "$RTT_JSON"
+    echo '[]' > "$THROUGHPUT_JSON"
     echo '{}' > "$QLEN_JSON"
 
     for (( run_num=1; run_num<=RUNS_NUM; run_num++ )); do
@@ -118,9 +120,9 @@ for run_type in "${RUN_TYPES[@]}"; do
 
       tail -n +2 "$METRICS_ROW" >> "$METRICS_CSV"
 
-      # Run rrt.py to use 'server_iperf_client.json' to generate an array of RTTS over time
-      #  (adds to aggreagte json)
+      # Run rrt.py to use 'server_iperf_client.json' to generate an array of RTTS and THROUGHPUT over time
       python3 rtt.py "$RUN_PATH/server_iperf_client.json" "$RTT_JSON"
+      python3 throughput.py "$RUN_PATH/server_iperf_client.json" "$THROUGHPUT_JSON"
     done
   ) &
 done
