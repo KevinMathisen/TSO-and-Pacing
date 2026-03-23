@@ -100,7 +100,7 @@ CLIENT_SSH="$USER@172.16.5.201"
 
 SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 
-DUR=8   # seconds to run
+DUR=9   # seconds to run
 START_CAPTURE=5 # second to start capture
 IPERF_PORT=5201
 CAPTURE_FILTER="tcp and src host $SERVER_IP and dst host $CLIENT_IP and dst port $IPERF_PORT"
@@ -108,7 +108,7 @@ CAPTURE_FILTER="tcp and src host $SERVER_IP and dst host $CLIENT_IP and dst port
 RUN_NUM=""
 TREATMENT=""
 CONNECTION_MODE=""
-FLOWS=0 # direct-link -> 2 flows, internet -> 4 flows, datacenter -> 4 flows
+FLOWS=0 # direct-link -> 4 flows, internet -> 4 flows, datacenter -> 4 flows
 QDISC=""
 
 while [[ $# -gt 0 ]]; do
@@ -118,7 +118,7 @@ while [[ $# -gt 0 ]]; do
     --no-tso)       TREATMENT="no-tso"; shift ;;
     --tso)          TREATMENT="tso"; shift ;;
     --tso-pacing)   TREATMENT="tso-pacing"; shift ;;
-    --direct-link)  CONNECTION_MODE="direct-link"; FLOWS=2; shift ;;
+    --direct-link)  CONNECTION_MODE="direct-link"; FLOWS=4; shift ;;
     --internet)     CONNECTION_MODE="internet"; FLOWS=4; shift ;;
     --datacenter)   CONNECTION_MODE="datacenter"; FLOWS=4; shift ;;
     --datacenter-hc) CONNECTION_MODE="datacenter-hc"; FLOWS=4; shift ;;
