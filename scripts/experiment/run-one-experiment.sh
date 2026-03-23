@@ -202,14 +202,6 @@ echo "Starting iperf3 server on CLIENT"
 CLIENT_IPERF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'nohup iperf3 -s -p $IPERF_PORT > /tmp/iperf_server_${RUN_NAME}.log 2>&1 & echo \$!'")"
 echo "Client iperf3 server pid: $CLIENT_IPERF_PID"
 
-# probe fq queue length if not direct link
-if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
-  echo ""
-  echo "Starting bpftrace on CLIENT (for ifb0)"
-  CLIENT_BPF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'BPFTRACE_MAP_KEYS_MAX=65536 nohup /home/kevinm/opt/bpftrace/squashfs-root/AppRun $SCRIPT_PATH/record_qlen_ifb.bt > /tmp/bpf_monitor_${RUN_NAME}.txt 2>&1 & echo \$!'")"
-  echo "Client bpftrace pid: $CLIENT_BPF_PID"
-fi
-
 sleep 1
 
 echo ""
@@ -221,6 +213,14 @@ SERVER_IPERF_PID="$!"
 
 # Wait START_CAPTURE
 sleep "$START_CAPTURE"
+
+# probe fq queue length if not direct link
+if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
+  echo ""
+  echo "Starting bpftrace on CLIENT (for ifb0)"
+  CLIENT_BPF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'BPFTRACE_MAP_KEYS_MAX=65536 nohup /home/kevinm/opt/bpftrace/squashfs-root/AppRun $SCRIPT_PATH/record_qlen_ifb.bt > /tmp/bpf_monitor_${RUN_NAME}.txt 2>&1 & echo \$!'")"
+  echo "Client bpftrace pid: $CLIENT_BPF_PID"
+fi
 
 echo ""
 echo "Starting pcap on EXTERNAL HOST"
