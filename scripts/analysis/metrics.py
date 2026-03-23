@@ -113,7 +113,7 @@ def find_dumpcap_log(run_path: Path):
     return matches[0]
 
 def find_bpf_log(run_path: Path):
-    matches = list(run_path.glob("bpf_monitor_*.log"))
+    matches = list(run_path.glob("bpf_monitor_*.txt"))
     if not matches:
         return None
     return matches[0]
