@@ -231,7 +231,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     positions = np.arange(1, len(solutions) + 1)
 
     # throughput
-    thr_data = [(sol["throughputs"] / 1e9) for sol in solutions]
+    thr_data = [(sol["throughputs"] / 1e9 * 4) for sol in solutions]
     bp_thr = ax_thr.boxplot(
         thr_data,
         positions=positions,
@@ -272,7 +272,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     if setup in ["direct-link_fq", "direct-link_fq_codel", "datacenter_fq"]:
         ax_rtt.set_ylim(bottom=0)
     elif setup == "internet_fq":
-        ax_rtt.set_ylim(bottom=50)
+        ax_rtt.set_ylim(bottom=20)
 
     ax_rtt.grid(True, axis="y", linestyle="--", alpha=0.5)
 
@@ -381,7 +381,7 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
 
     _save_close(fig, out_path)
 
-def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out_path: Path):
+def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out_path: Path, ylim: int):
     fig = plt.figure(figsize=(8, 6))
 
     for s in solutions:
@@ -400,7 +400,8 @@ def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out
 
     ax.grid(True, which="major", axis="x", alpha=0.7, linestyle="--", linewidth=0.7)
 
-    plt.xlim(1, 1000)
+    if ylim:
+        plt.xlim(1, ylim)
     plt.xlabel(xlabel)
     plt.ylabel("Cumulative Probability")
     plt.legend()
@@ -433,20 +434,20 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     plot_cdf(
         solutions, setup, "per_flow_idt_us",
         xlabel="Inter-departure time within flow (µs)",
-        out_path=setup_dir / "per_flow_idt_cdf.png",
+        out_path=setup_dir / "per_flow_idt_cdf.png", ylim=1000,
     )
 
     plot_cdf(
         solutions, setup, "aggregate_idt_us",
         xlabel="Inter-departure time across all flows in run (µs)",
-        out_path=setup_dir / "aggregate_idt_cdf.png",
+        out_path=setup_dir / "aggregate_idt_cdf.png", ylim=1000,
     )
 
     if len(solutions[0]["qlens"]) > 0:
         plot_cdf(
             solutions, setup, "qlens",
             xlabel="FQ/pacing IFB queue length",
-            out_path=setup_dir / "qlens_cdf.png",
+            out_path=setup_dir / "qlens_cdf.png", ylim=0
         )
 
 
