@@ -22,8 +22,8 @@ SETUPS = [
 # SETUPS = ["datacenter_fq"]
 
 SOLUTIONS = {
-    "no-tso": "No TSO",
-    "tso": "TSO",
+    "no-tso": "TSO Off",
+    "tso": "TSO On",
     "tso-pacing": "TSO Pacing",
 }
 
@@ -37,7 +37,7 @@ plt.rcParams.update({
     "axes.titlesize": 20,
     "axes.labelsize": 26,
     "legend.fontsize": 26,
-    "xtick.labelsize": 23,
+    "xtick.labelsize": 21,
     "ytick.labelsize": 21,
 })
 
@@ -276,6 +276,10 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
 
     ax_rtt.grid(True, axis="y", linestyle="--", alpha=0.5)
 
+    for ax in (ax_thr, ax_rtt):
+        ax.tick_params(axis="x", labelrotation=25, labelsize=20)
+        ax.margins(x=0.05)
+
     _save_close(fig, out_path)
 
 def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
@@ -323,6 +327,10 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
     ax_sender.grid(True, axis="y", linestyle="--", alpha=0.5)
     ax_receiver.grid(True, axis="y", linestyle="--", alpha=0.5)
 
+    for ax in (ax_sender, ax_receiver):
+        ax.tick_params(axis="x", labelrotation=25, labelsize=20)
+        ax.margins(x=0.05)
+    
     # no legend needed
     _save_close(fig, out_path)
 
@@ -367,8 +375,8 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
 
     ax.yaxis.set_minor_formatter(mp.ticker.FormatStrFormatter('%d'))
     ax.tick_params(axis="y", which="minor", length=3, width=0.8, labelsize=16)
-    ax.tick_params(axis="y", which="major", length=6, width=1.0, labelsize=18)
-    ax.tick_params(axis="x", which="major", length=6, width=1.0, labelsize=18)
+    ax.tick_params(axis="y", which="major", length=6, width=1.0, labelsize=20)
+    ax.tick_params(axis="x", which="major", length=6, width=1.0, labelsize=20)
     ax.tick_params(axis="y", which="both", right=True, labelright=False)
 
     plt.ylim(0, 35.1)
@@ -434,13 +442,13 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     plot_cdf(
         solutions, setup, "per_flow_idt_us",
         xlabel="Inter-departure time within flow (µs)",
-        out_path=setup_dir / "per_flow_idt_cdf.png", ylim=1000,
+        out_path=setup_dir / "per_flow_idt_cdf.png", ylim=1100,
     )
 
     plot_cdf(
         solutions, setup, "aggregate_idt_us",
         xlabel="Inter-departure time across all flows in run (µs)",
-        out_path=setup_dir / "aggregate_idt_cdf.png", ylim=1000,
+        out_path=setup_dir / "aggregate_idt_cdf.png", ylim=1100,
     )
 
     if len(solutions[0]["qlens"]) > 0:
