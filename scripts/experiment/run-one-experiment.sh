@@ -25,9 +25,6 @@ cleanup() {
   else
     ssh "$CLIENT_SSH" "sudo pkill -f 'iperf3 -s'" 2>/dev/null
   fi
-  if [[ -n "$CLIENT_BPF_PID" ]]; then
-    ssh "$CLIENT_SSH" "sudo kill -INT $CLIENT_BPF_PID" 2>/dev/null
-  fi
 }
 trap cleanup EXIT INT TERM
 
@@ -193,13 +190,6 @@ SERVER_IPERF_PID="$!"
 # Wait START_CAPTURE
 sleep "$START_CAPTURE"
 
-# probe fq queue length if not direct link
-if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
-  echo ""
-  echo "Starting bpftrace on CLIENT (for ifb0)"
-  CLIENT_BPF_PID="$(ssh -o BatchMode=yes "$CLIENT_SSH" "sudo sh -c 'BPFTRACE_MAP_KEYS_MAX=65536 nohup /home/kevinm/opt/bpftrace/squashfs-root/AppRun $SCRIPT_PATH/record_qlen_ifb.bt > /tmp/bpf_monitor_${RUN_NAME}.txt 2>&1 & echo \$!'")"
-  echo "Client bpftrace pid: $CLIENT_BPF_PID"
-fi
 
 echo ""
 echo "Starting DPDK benchmark on EXTERNAL HOST"
@@ -212,12 +202,6 @@ ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo /receiver/benchmark.sh -d 1 -o $BENCH
 wait "$SERVER_IPERF_PID"
 sleep 1
 
-if [[ -n "$CLIENT_BPF_PID" ]]; then
-  echo "Stopping bpftrace on CLIENT"
-  ssh "$CLIENT_SSH" "sudo kill -INT $CLIENT_BPF_PID" || true
-  CLIENT_BPF_PID=""
-  sleep 1
-fi
 
 echo ""
 echo "Data transmission done, stopping iperf3 server on CLIENT"
@@ -229,14 +213,9 @@ echo "Copying "
 ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
 scp "$EXTERNAL_SSH:$BENCH_OUT/timestamp1*.csv" "$OUT_DIR/" || true
 
-if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
-  ssh "$CLIENT_SSH" "sudo chown $USER:$USER /tmp/bpf_monitor_${RUN_NAME}.txt 2>/dev/null" || true
-  scp "$CLIENT_SSH:/tmp/bpf_monitor_${RUN_NAME}.txt" "$OUT_DIR/bpf_monitor_${RUN_NAME}.txt" || true
-fi
 
 # Then remove capture
 ssh "$EXTERNAL_SSH" "sudo rm -rf $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
-ssh "$CLIENT_SSH" "sudo rm -f /tmp/bpf_monitor_${RUN_NAME}.txt"
 
 # ====== Save interface stats after ====== 
 # should save all interfaces, client IFB, and of course iperf client on SERVER statistics.  
