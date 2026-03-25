@@ -197,7 +197,7 @@ ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo /receiver/benchmark.sh -d 1 -o $BENCH
 BENCH_PID="$!"
 
 # Wait until everything done
-wait "$SERVER_IPERF_PID"
+wait "$SERVER_IPERF_PID" "$BENCH_PID"
 sleep 1
 
 
@@ -210,8 +210,17 @@ CLIENT_IPERF_PID=""
 # capture done, retrieve output (wait until iperf done)
 echo "Copying "
 
+ssh "$CLIENT_SSH" "sudo chown $USER:$USER /dev/shm/$CAPTURE_OUT 2>/dev/null" || true
+scp "$CLIENT_SSH:/dev/shm/$CAPTURE_OUT" "$OUT_DIR/$CAPTURE_OUT"
+
+ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
+scp "$EXTERNAL_SSH:$BENCH_OUT/timestamp1*.csv" "$OUT_DIR/" || true
+
 
 # Then remove capture
+ssh "$CLIENT_SSH" "sudo rm -f /dev/shm/$CAPTURE_OUT"
+
+ssh "$EXTERNAL_SSH" "sudo rm -rf $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
 
 
 # ====== Save interface stats after ====== 
