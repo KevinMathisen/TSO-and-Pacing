@@ -188,7 +188,13 @@ SERVER_IPERF_PID="$!"
 # Wait START_CAPTURE
 sleep "$START_CAPTURE"
 
+echo ""
+echo "Starting DPDK benchmark on EXTERNAL HOST"
+BENCH_OUT="/dev/shm/bench_kevin"
 
+ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo /receiver/benchmark.sh -d 1 -o $BENCH_OUT" \
+ > "$OUT_DIR/benchmark_${RUN_NAME}.log" 2>&1
+BENCH_PID="$!"
 
 # Wait until everything done
 wait "$SERVER_IPERF_PID"
