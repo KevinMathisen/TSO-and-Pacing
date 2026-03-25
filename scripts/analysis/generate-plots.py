@@ -34,9 +34,9 @@ COLORS = {
 }
 
 plt.rcParams.update({
-    "axes.titlesize": 20,
+    "axes.titlesize": 26,
     "axes.labelsize": 26,
-    "legend.fontsize": 26,
+    "legend.fontsize": 23,
     "xtick.labelsize": 21,
     "ytick.labelsize": 21,
 })
@@ -124,8 +124,6 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
     metrics = pd.read_csv(sol_dir / "metrics.csv")
     with open(sol_dir / "rtt.json", "r") as f:
         rtts = json.load(f)
-    with open(sol_dir / "throughput.json", "r") as f:
-        throughputs = json.load(f)
     with open(sol_dir / "qlen.json", "r") as f:
         qlens = json.load(f)
 
@@ -151,7 +149,6 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
     metrics["cpu_receiver"] = pd.to_numeric(metrics["cpu_receiver"])
 
     rtts = np.array(rtts, dtype=np.float64)
-    throughputs = np.array(throughputs, dtype=np.float64)
 
     # to plot cdf, we want qlengths as array of each occured value
     if qlens:
@@ -170,7 +167,6 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
         "packets": packets,
         "metrics": metrics,
         "rtts": rtts,
-        "throughputs": throughputs,
         "qlens": qlens,
     }
 
@@ -179,7 +175,7 @@ def prepare_solution_data(solution_data: dict) -> dict:
     packets = solution_data["packets"]
     metrics = solution_data["metrics"]
 
-    # throughput_bps = metrics["throughput_bps"].dropna().to_numpy(dtype=np.float64)
+    throughput_bps = metrics["throughput_bps"].dropna().to_numpy(dtype=np.float64)
     cpu_sender = metrics["cpu_sender"].dropna().to_numpy(dtype=np.float64)
     cpu_receiver = metrics["cpu_receiver"].dropna().to_numpy(dtype=np.float64)
 
@@ -190,6 +186,7 @@ def prepare_solution_data(solution_data: dict) -> dict:
 
     return {
         **solution_data,
+        "throughput_bps": throughput_bps,
         "cpu_sender": cpu_sender,
         "cpu_receiver": cpu_receiver,
         "first_flow_timeseries": first_flow_timeseries,
@@ -229,22 +226,23 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
 
     labels = [sol["label"] for sol in solutions]
     positions = np.arange(1, len(solutions) + 1)
+    colors = [sol["color"] for sol in solutions]
 
     # throughput
-    thr_data = [(sol["throughputs"] / 1e9 * 4) for sol in solutions]
-    bp_thr = ax_thr.boxplot(
-        thr_data,
-        positions=positions,
-        widths=0.6,
-        patch_artist=True,
-        labels=labels,
-    )
+    thr_data = [(sol["throughput_bps"] / 1e9) for sol in solutions]
+    thr_means = [np.mean(sol_thr) for sol_thr in thr_data]
+    thr_stds = [np.std(sol_thr, ddof=1) for sol_thr in thr_data]
 
-    for i, sol in enumerate(solutions):
-        bp_thr["boxes"][i].set_facecolor(sol["color"])
-        bp_thr["boxes"][i].set_alpha(1)
-    for med in bp_thr["medians"]:
-        med.set_color("black")
+    ax_thr.bar(positions, thr_means, yerr=thr_stds, color=colors,
+               edgecolor="black", capsize=5, zorder=3)
+    
+    # set ylim based on expected throughput
+    if setup in ["direct-link_fq", "direct-link_fq_codel"]:
+        ax_thr.set_ylim(8.6, 9.6)
+    elif setup == "datacenter_fq":
+        ax_thr.set_ylim(3.4, 4.4)
+    elif setup == "internet_fq":
+        ax_thr.set_ylim(0.8, 1.8)
 
     ax_thr.set_title("Throughput")
     ax_thr.set_ylabel("Throughput (Gbps)")
@@ -287,37 +285,21 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
 
     labels = [sol["label"] for sol in solutions]
     positions = np.arange(1, len(solutions) + 1)
+    colors = [sol["color"] for sol in solutions]
 
     sender_data = [sol["cpu_sender"] for sol in solutions]
+    sender_means = [np.mean(d) for d in sender_data]
+    sender_stds = [np.std(d, ddof=1) for d in sender_data]
+
     receiver_data = [sol["cpu_receiver"] for sol in solutions]
+    receiver_means = [np.mean(d) for d in receiver_data]
+    receiver_stds = [np.std(d, ddof=1) for d in receiver_data]
 
-    bp_sender = ax_sender.boxplot(
-        sender_data,
-        positions=positions,
-        widths=0.6,
-        patch_artist=True,
-        labels=labels,
-    )
+    ax_sender.bar(positions, sender_means, yerr=sender_stds, width=0.6, 
+                  color=colors, edgecolor="black", capsize=5, zorder=3)
 
-    bp_receiver = ax_receiver.boxplot(
-        receiver_data,
-        positions=positions,
-        widths=0.6,
-        patch_artist=True,
-        labels=labels,
-    )
-
-    # color + medians
-    for i, sol in enumerate(solutions):
-        bp_sender["boxes"][i].set_facecolor(sol["color"])
-        bp_sender["boxes"][i].set_alpha(1)
-        bp_receiver["boxes"][i].set_facecolor(sol["color"])
-        bp_receiver["boxes"][i].set_alpha(1)
-
-    for med in bp_sender["medians"]:
-        med.set_color("black")
-    for med in bp_receiver["medians"]:
-        med.set_color("black")
+    ax_receiver.bar(positions, receiver_means, yerr=receiver_stds, width=0.6, 
+                    color=colors, edgecolor="black", capsize=5, zorder=3)
 
     ax_sender.set_title("Sender CPU")
     ax_receiver.set_title("Receiver CPU")
@@ -328,6 +310,8 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
     ax_receiver.grid(True, axis="y", linestyle="--", alpha=0.5)
 
     for ax in (ax_sender, ax_receiver):
+        ax.set_xticks(positions)
+        ax.set_xticklabels(labels)
         ax.tick_params(axis="x", labelrotation=25, labelsize=20)
         ax.margins(x=0.05)
     
@@ -389,7 +373,7 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
 
     _save_close(fig, out_path)
 
-def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out_path: Path, ylim: int):
+def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out_path: Path, xlim: int):
     fig = plt.figure(figsize=(8, 6))
 
     for s in solutions:
@@ -408,8 +392,8 @@ def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out
 
     ax.grid(True, which="major", axis="x", alpha=0.7, linestyle="--", linewidth=0.7)
 
-    if ylim:
-        plt.xlim(1, ylim)
+    if xlim:
+        plt.xlim(1, xlim)
     plt.xlabel(xlabel)
     plt.ylabel("Cumulative Probability")
     plt.legend()
@@ -442,20 +426,20 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     plot_cdf(
         solutions, setup, "per_flow_idt_us",
         xlabel="Inter-departure time within flow (µs)",
-        out_path=setup_dir / "per_flow_idt_cdf.png", ylim=1100,
+        out_path=setup_dir / "per_flow_idt_cdf.png", xlim=1100,
     )
 
     plot_cdf(
         solutions, setup, "aggregate_idt_us",
         xlabel="Inter-departure time across all flows in run (µs)",
-        out_path=setup_dir / "aggregate_idt_cdf.png", ylim=1100,
+        out_path=setup_dir / "aggregate_idt_cdf.png", xlim=1100,
     )
 
     if len(solutions[0]["qlens"]) > 0:
         plot_cdf(
             solutions, setup, "qlens",
             xlabel="FQ/pacing IFB queue length",
-            out_path=setup_dir / "qlens_cdf.png", ylim=0
+            out_path=setup_dir / "qlens_cdf.png", xlim=0
         )
 
 
