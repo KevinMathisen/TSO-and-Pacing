@@ -22,9 +22,8 @@ def main():
             data = json.load(f)
 
         for interval in data.get("intervals", []):
-            for stream in interval.get("streams", []):
-                if "bits_per_second" in stream:
-                    throughput.append(stream["bits_per_second"])
+            if "bits_per_second" in interval["sum"]:
+                throughput.append(interval["sum"]["bits_per_second"])
     except Exception:
         pass
 
