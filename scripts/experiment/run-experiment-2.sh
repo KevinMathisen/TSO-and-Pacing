@@ -209,12 +209,12 @@ CLIENT_IPERF_PID=""
 
 # capture done, retrieve output (wait until iperf done)
 echo "Copying "
-ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
+ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER $BENCH_OUT"
 scp "$EXTERNAL_SSH:$BENCH_OUT/timestamp1*.csv" "$OUT_DIR/" || true
 
 
 # Then remove capture
-ssh "$EXTERNAL_SSH" "sudo rm -rf $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
+ssh "$EXTERNAL_SSH" "sudo rm -rf $BENCH_OUT"
 
 
 # ====== Save interface stats after ====== 
