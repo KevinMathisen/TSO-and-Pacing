@@ -48,7 +48,7 @@ setup_server() {
     fq_codel) qdisc_flag="--fq-codel" ;;
   esac
 
-  "$SCRIPT_PATH"./setup-server-experiment "$tso_flag" "$mode_flag" "$qdisc_flag"
+  "$SCRIPT_PATH"/setup-server-experiment.sh "$tso_flag" "$mode_flag" "$qdisc_flag"
 }
 
 setup_client() {
@@ -197,9 +197,10 @@ BENCH_OUT="/dev/shm/bench_kevin"
 
 ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo /receiver/benchmark.sh -d 1 -o $BENCH_OUT" \
  > "$OUT_DIR/benchmark_${RUN_NAME}.log" 2>&1
+BENCH_PID="$!"
 
 # Wait until everything done
-wait "$SERVER_IPERF_PID"
+wait "$SERVER_IPERF_PID" "$BENCH_PID"
 sleep 1
 
 
