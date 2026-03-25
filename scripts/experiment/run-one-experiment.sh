@@ -13,7 +13,6 @@ fi
 
 # ============== Ensure everything killed on exit function ===========
 CLIENT_IPERF_PID=""
-EXTERNAL_DUMPCAP_PID=""
 SERVER_IPERF_PID=""
 
 cleanup() {
@@ -28,11 +27,6 @@ cleanup() {
   fi
   if [[ -n "$CLIENT_BPF_PID" ]]; then
     ssh "$CLIENT_SSH" "sudo kill -INT $CLIENT_BPF_PID" 2>/dev/null
-  fi
-  if [[ -n "$EXTERNAL_DUMPCAP_PID" ]]; then
-    ssh "$EXTERNAL_SSH" "sudo kill $EXTERNAL_DUMPCAP_PID" 2>/dev/null
-  else
-    ssh "$EXTERNAL_SSH" "sudo pkill -f dumpcap" 2>/dev/null
   fi
 }
 trap cleanup EXIT INT TERM
@@ -73,10 +67,6 @@ setup_client() {
   ssh "$CLIENT_SSH" "sudo pkill -f 'iperf3 -s'" 2>/dev/null || true
 }
 
-setup_external() {
-  ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo $SCRIPT_PATH/setup-external-host-experiment"
-}
-
 # ========= Functions for saving interface stats ==========
 
 save_server_stats() {
@@ -90,11 +80,6 @@ save_client_stats() {
   ssh -o BatchMode=yes "$CLIENT_SSH" "sudo tc -s qdisc show dev ifb0" > "$OUT_DIR/client_tc_ifb0_${1}.txt" || true
 }
 
-save_external_stats() {
-  ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo ethtool -S '$EXTERNAL_HOST_DEV'" > "$OUT_DIR/external_ethtool_${1}.txt"
-  ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo ip -s link show dev '$EXTERNAL_HOST_DEV'" > "$OUT_DIR/external_iplink_${1}.txt"
-}
-
 
 
 # ========= Configuration ==========
@@ -104,11 +89,10 @@ CLIENT_IP="10.111.0.2" # munnin
 
 SERVER_DEV="enp2s0np0"
 CLIENT_DEV="enp1s0np0"
-EXTERNAL_HOST_DEV="enp1s0np0"
 
 USER="kevinm"
 CLIENT_SSH="$USER@172.16.5.201"
-EXTERNAL_SSH="$USER@172.16.5.150"
+EXTERNAL_SSH="$USER@172.16.5.158"
 
 SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 
@@ -177,7 +161,6 @@ echo ""
 echo "Configuring all machines"
 setup_server
 setup_client
-setup_external
 
 
 
@@ -186,7 +169,6 @@ echo ""
 echo "Saving interface stats before test"
 save_server_stats before
 save_client_stats before
-save_external_stats before
 
 
 
@@ -220,11 +202,11 @@ if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
 fi
 
 echo ""
-echo "Starting pcap on EXTERNAL HOST"
-CAPTURE_OUT="capture_${RUN_NAME}.pcapng"
+echo "Starting DPDK benchmark on EXTERNAL HOST"
+BENCH_OUT="/dev/shm/bench_kevin"
 
-ssh "$EXTERNAL_SSH" "sudo dumpcap -q -i $EXTERNAL_HOST_DEV -w /dev/shm/$CAPTURE_OUT -f '$CAPTURE_FILTER' -s 128 -B 256 -a duration:1 &> /tmp/dumpcap_${RUN_NAME}.log 2>&1"
-
+ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo /receiver/benchmark.sh -d 1 -o $BENCH_OUT" \
+ > "$OUT_DIR/benchmark_${RUN_NAME}.log" 2>&1
 
 # Wait until everything done
 wait "$SERVER_IPERF_PID"
@@ -242,31 +224,30 @@ echo "Data transmission done, stopping iperf3 server on CLIENT"
 ssh "$CLIENT_SSH" "sudo kill $CLIENT_IPERF_PID" || true
 CLIENT_IPERF_PID=""
 
-# capture done, retrieve output (wait until iperf done)
+# capture done, retrieve output
 echo "Copying "
-ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER /dev/shm/$CAPTURE_OUT /tmp/dumpcap_${RUN_NAME}.log"
-scp "$EXTERNAL_SSH:/dev/shm/$CAPTURE_OUT" "$OUT_DIR/$CAPTURE_OUT"
-scp "$EXTERNAL_SSH:/tmp/dumpcap_${RUN_NAME}.log" "$OUT_DIR/dumpcap_${RUN_NAME}.log" || true
+ssh "$EXTERNAL_SSH" "sudo chown $USER:$USER $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
+scp "$EXTERNAL_SSH:$BENCH_OUT/timestamp1*.csv" "$OUT_DIR/" || true
+
 if [[ "$CONNECTION_MODE" != "direct-link" ]]; then
   ssh "$CLIENT_SSH" "sudo chown $USER:$USER /tmp/bpf_monitor_${RUN_NAME}.txt 2>/dev/null" || true
   scp "$CLIENT_SSH:/tmp/bpf_monitor_${RUN_NAME}.txt" "$OUT_DIR/bpf_monitor_${RUN_NAME}.txt" || true
 fi
 
 # Then remove capture
-ssh "$EXTERNAL_SSH" "sudo rm /dev/shm/$CAPTURE_OUT /tmp/dumpcap_${RUN_NAME}.log"
+ssh "$EXTERNAL_SSH" "sudo rm -rf $BENCH_OUT /tmp/bench_log_${RUN_NAME}.log"
 ssh "$CLIENT_SSH" "sudo rm -f /tmp/bpf_monitor_${RUN_NAME}.txt"
 
 # ====== Save interface stats after ====== 
-# should save all interfaces, if EXTERNAL HOST PCAP dropped any packets, client IFB, and of course iperf client on SERVER statistics.  
+# should save all interfaces, client IFB, and of course iperf client on SERVER statistics.  
 echo ""
 echo "Saving interface stats after test"
 save_server_stats after
 save_client_stats after
-save_external_stats after
 
 # save qdisc used on server
 tc -s qdisc show dev "$SERVER_DEV" > "$OUT_DIR/server_qdisc.txt" || true
-
+ethtool -k "$SERVER_DEV" | grep "tcp-segmentation-offload" >> "$OUT_DIR/server_qdisc.txt" || true
 
 # change owner of output to user
 chown -R "$USER:$USER" "$OUT_DIR"
