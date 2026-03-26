@@ -94,7 +94,7 @@ EXTERNAL_SSH="$USER@172.16.5.158"
 
 SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/experiment"
 
-DUR=9   # seconds to run
+DUR=12   # seconds to run
 START_CAPTURE=5 # second to start capture
 
 RUN_NUM=""
