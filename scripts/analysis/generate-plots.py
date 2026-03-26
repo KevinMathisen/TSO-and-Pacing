@@ -129,16 +129,12 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
 
     packets["run_num"] = pd.to_numeric(packets["run_num"])
     packets["stream_id"] = pd.to_numeric(packets["stream_id"])
-    packets["tcp_len"] = pd.to_numeric(packets["tcp_len"])
     packets["p4_timestamp_ns"] = pd.to_numeric(packets["p4_timestamp_ns"])
 
     # remove flows with less than 100 packets
     flow_packet_counts = packets.groupby("stream_id").size()
     valid_stream_ids = flow_packet_counts[flow_packet_counts >= 100].index
     packets = packets[packets["stream_id"].isin(valid_stream_ids)]
-
-    # remove packets with no payload (although also do this in parse-p4sta.py)
-    packets = packets[packets["tcp_len"] > 0]
 
     # sort all packets (although also do this in parse-p4sta.py)
     packets = packets.sort_values("p4_timestamp_ns", kind="mergesort")
@@ -231,7 +227,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     # throughput
     thr_data = [(sol["throughput_bps"] / 1e9) for sol in solutions]
     thr_means = [np.mean(sol_thr) for sol_thr in thr_data]
-    thr_stds = [np.std(sol_thr, ddof=1) for sol_thr in thr_data]
+    thr_stds = [np.std(sol_thr, ddof=1) if len(sol_thr) > 1 else 0.0 for sol_thr in thr_data]
 
     ax_thr.bar(positions, thr_means, yerr=thr_stds, color=colors,
                edgecolor="black", capsize=5, zorder=3)
@@ -289,11 +285,11 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
 
     sender_data = [sol["cpu_sender"] for sol in solutions]
     sender_means = [np.mean(d) for d in sender_data]
-    sender_stds = [np.std(d, ddof=1) for d in sender_data]
+    sender_stds = [np.std(d, ddof=1) if len(d) > 1 else 0.0 for d in sender_data]
 
     receiver_data = [sol["cpu_receiver"] for sol in solutions]
     receiver_means = [np.mean(d) for d in receiver_data]
-    receiver_stds = [np.std(d, ddof=1) for d in receiver_data]
+    receiver_stds = [np.std(d, ddof=1) if len(d) > 1 else 0.0 for d in receiver_data]
 
     ax_sender.bar(positions, sender_means, yerr=sender_stds, width=0.6, 
                   color=colors, edgecolor="black", capsize=5, zorder=3)
