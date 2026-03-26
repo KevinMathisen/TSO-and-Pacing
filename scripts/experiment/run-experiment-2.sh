@@ -225,6 +225,7 @@ save_client_stats after
 
 # save qdisc used on server
 tc -s qdisc show dev "$SERVER_DEV" > "$OUT_DIR/server_qdisc.txt" || true
+sudo ethtool -k enp2s0np0  | grep "segmentation-offload" >> "$OUT_DIR/server_qdisc.txt" || true
 
 
 # change owner of output to user
