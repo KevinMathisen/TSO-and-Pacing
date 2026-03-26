@@ -192,7 +192,7 @@ echo ""
 echo "Starting DPDK benchmark on EXTERNAL HOST"
 BENCH_OUT="/dev/shm/bench_kevin"
 
-ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo /receiver/benchmark.sh -d 1 -o $BENCH_OUT" \
+ssh -o BatchMode=yes "$EXTERNAL_SSH" "sudo /receiver/benchmark.sh -d 2 -o $BENCH_OUT" \
  > "$OUT_DIR/benchmark_${RUN_NAME}.log" 2>&1
 BENCH_PID="$!"
 
