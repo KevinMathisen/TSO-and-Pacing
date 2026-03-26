@@ -31,8 +31,8 @@ run_setup () {
   echo "============================================================"
 
   for ((i=1; i<=RUNS_PER_SETUP; i++)); do
-    ./run-one-experiment.sh --run-num "$i" "$mode" "$qdisc" "$treatment"
-    sleep 10
+    ./run-experiment-2.sh --run-num "$i" "$mode" "$qdisc" "$treatment"
+    sleep 5
   done
 }
 
