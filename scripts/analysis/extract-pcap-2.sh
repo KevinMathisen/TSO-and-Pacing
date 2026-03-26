@@ -23,6 +23,7 @@ done
 
 ts="$(date +%Y%m%d-%H%M)"
 RUN_DIR="./run-$ts"
+RUN_DIR="./run-20260326-1844"
 DUMP_DIR="$RUN_DIR/dump"
 AGG_DIR="$RUN_DIR/aggregates"
 
@@ -33,7 +34,7 @@ echo "Placing metrics and data in $RUN_DIR"
 echo ""
 echo "Retrieving logs and packet captures from $SERVER:$SERVER_DIR..."
 # Assume server only has directories we need, so copy all!
-ssh "$SERVER" "cd $SERVER_DIR && tar -czf - ." | tar -xzf - -C "$DUMP_DIR/"
+# ssh "$SERVER" "cd $SERVER_DIR && tar -czf - ." | tar -xzf - -C "$DUMP_DIR/"
 
 # For each of the predefined combinations
 RUN_TYPES=(
@@ -69,8 +70,8 @@ for run_type in "${RUN_TYPES[@]}"; do
     QLEN_JSON="$OUT_DIR/qlen.json"
 
     # initial aggregate files for run type
-    echo 'run_name,run_num,stream_id,tcp_len,p4_timestamp_ns,p4_timestamp_prev_ns' > "$PACKETS_CSV"
-    echo 'run_name,run_num,throughput_bps,cpu_sender,cpu_receiver,retransmissions,fast_retransmissions,out_of_order,lost_segments,server_drops,client_drops,client_ifb_drops,external_drops,dumpcap_drops' > "$METRICS_CSV"
+    echo 'run_name,run_num,stream_id,p4_timestamp_ns' > "$PACKETS_CSV"
+    echo 'run_name,run_num,throughput_bps,cpu_sender,cpu_receiver,server_drops,client_drops,client_ifb_drops,external_drops,dumpcap_drops' > "$METRICS_CSV"
     echo '[]' > "$RTT_JSON"
     echo '[]' > "$THROUGHPUT_JSON"
     echo '{}' > "$QLEN_JSON"
@@ -86,37 +87,16 @@ for run_type in "${RUN_TYPES[@]}"; do
       TMP_DIR="$OUT_DIR/tmp_run_${run_num}"
       mkdir -p "$TMP_DIR"
 
-      PCAP_IN="$(find "$RUN_PATH" -maxdepth 1 -name 'capture_*.pcapng' | head -n1)"
-      RAW_CSV="$TMP_DIR/tshark_raw.csv"
-      PARSED_CSV="$TMP_DIR/packets_parsed.csv"
+      TS_RAW_CSV="$(find "$RUN_PATH" -maxdepth 1 -name 'timestamp1*.csv' | head -n1)"
+      DPDK_LOG="$(find "$RUN_PATH" -maxdepth 1 -name 'benchmark*.log' | head -n1)"
       METRICS_ROW="$TMP_DIR/metrics_row.csv"
+      PARSED_CSV="$TMP_DIR/parsed_packets.csv"
 
-      # Convert pcap to csv using thsark to extract following for timestamp analysis
-      tshark -n -r "$PCAP_IN" \
-        -T fields -E header=y -E separator=, -E quote=d \
-        -o tcp.desegment_tcp_streams:FALSE \
-        -o ip.defragment:FALSE -o ipv6.defragment:FALSE \
-        -o tcp.check_checksum:FALSE \
-        -e frame.time_epoch -e frame.number \
-        -e tcp.stream -e tcp.seq -e tcp.len \
-        -e tcp.analysis.retransmission -e tcp.analysis.fast_retransmission \
-        -e tcp.analysis.out_of_order -e tcp.analysis.lost_segment \
-        -e data.data \
-        > "$RAW_CSV"
-
-      # Run parse-p4sta-timestamps.py to extract timestamps from tcp payload
-      # payload -> extract first 48 bit timestamp by finding signature 0x0f in tcp options, then extacting 48 bit
-      python3 parse-p4sta-timestamps.py "$RAW_CSV" "$PARSED_CSV" "$RUN_NAME" "$run_num"
-      # Resulting csv contains: run_name,run_num,stream_id,tcp_len,p4_timestamp_ns
-
-      # Ensure packets are sorted (column 5 has timestamp)
-      { head -n1 "$PARSED_CSV"; tail -n +2 "$PARSED_CSV" | LC_ALL=C sort -t, -k5,5n; } > "$PARSED_CSV.sorted"
-      mv "$PARSED_CSV.sorted" "$PARSED_CSV"
-
+      python3 parse-raw-timestamps.py "$TS_RAW_CSV" "$PARSED_CSV" "$RUN_NAME" "$run_num"
       tail -n +2 "$PARSED_CSV" >> "$PACKETS_CSV"
 
       # Run metrics.py to use .tmp csv and other logs/counters to generate metrics.csv
-      python3 metrics.py "$RUN_PATH" "$RAW_CSV" "$METRICS_ROW" "$RUN_NAME" "$run_num" "$QLEN_JSON"
+      python3 metrics.py "$RUN_PATH" "$DPDK_LOG" "$METRICS_ROW" "$RUN_NAME" "$run_num" "$QLEN_JSON"
 
       tail -n +2 "$METRICS_ROW" >> "$METRICS_CSV"
 
