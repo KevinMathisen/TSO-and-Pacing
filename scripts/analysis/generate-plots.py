@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
 
-MICRO_BIN_US = 40
+MICRO_BIN_US = 20
 FIRST_FLOW_TIMESERIES_MS = 10
 
 SETUPS = [
@@ -19,7 +19,7 @@ SETUPS = [
     "internet_fq",
     "direct-link_fq_codel",
 ]
-# SETUPS = ["datacenter_fq"]
+# SETUPS = ["direct-link_fq"]
 
 SOLUTIONS = {
     "no-tso": "TSO Off",
@@ -76,6 +76,16 @@ def get_first_flow_timeseries(df_packets: pd.DataFrame, bin_us: int) -> pd.DataF
     t_s = get_first_flow_times(df_packets)
     return build_packets_per_bin_timeseries(t_s, bin_us)
 
+def get_all_flows_timeseries(df: pd.DataFrame, bin_us: int) -> dict[int, pd.DataFrame]:
+    first_run_num = int(df["run_num"].min())
+    df_run = df[df["run_num"] == first_run_num]
+    
+    flow_timeseries = {}
+    for stream_id, df_flow in df_run.groupby("stream_id", sort=True):
+        t_s = packet_times_s(df_flow)
+        flow_timeseries[int(stream_id)] = build_packets_per_bin_timeseries(t_s, bin_us)
+        
+    return flow_timeseries
 
 def per_flow_inter_departure_us(df: pd.DataFrame) -> np.ndarray:
     """
@@ -176,6 +186,7 @@ def prepare_solution_data(solution_data: dict) -> dict:
     cpu_receiver = metrics["cpu_receiver"].dropna().to_numpy(dtype=np.float64)
 
     first_flow_timeseries = get_first_flow_timeseries(packets, MICRO_BIN_US)
+    all_flows_timeseries = get_all_flows_timeseries(packets, MICRO_BIN_US)
 
     per_flow_idt_us = per_flow_inter_departure_us(packets)
     aggregate_idt_us = aggregate_inter_departure_us(packets)
@@ -186,6 +197,7 @@ def prepare_solution_data(solution_data: dict) -> dict:
         "cpu_sender": cpu_sender,
         "cpu_receiver": cpu_receiver,
         "first_flow_timeseries": first_flow_timeseries,
+        "all_flows_timeseries": all_flows_timeseries,
         "per_flow_idt_us": per_flow_idt_us,
         "aggregate_idt_us": aggregate_idt_us,
     }
@@ -361,11 +373,80 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
 
     plt.ylim(0, 35.1)
     plt.xlim(x_start, x_end)
-
+    print(f"hello, {MICRO_BIN_US}!")
     plt.xlabel("Time elapsed (ms)")
     plt.ylabel(f"Packets per {MICRO_BIN_US} µs bin")
     # plt.title(f"Packet timeseries ({FIRST_FLOW_TIMESERIES_MS} ms)")
     plt.legend(loc='upper right')
+
+    _save_close(fig, out_path)
+
+def plot_flows_tso_pacing_timeseries(solutions: list[dict], setup: str, out_path: Path):
+    fig = plt.figure(figsize=(10, 6))
+
+    x_start, x_end = 0, FIRST_FLOW_TIMESERIES_MS
+    if setup in ["direct-link_fq", "direct-link_fq_codel"]:
+        x_start, x_end = 200, 203
+    elif setup == "datacenter_fq":
+        x_start, x_end = 100, 105
+    elif setup == "internet_fq":
+        x_start, x_end = 100, 108
+
+    tso_pacing_sol = next((s for s in solutions if s["solution"] == "tso-pacing"), None)
+    
+    if not tso_pacing_sol:
+        print("Warning: TSO-Pacing solution not found for plot_flows_tso_pacing_timeseries")
+        return
+
+    flows_timeseries = tso_pacing_sol["all_flows_timeseries"]
+    
+    global_t0 = None
+    for df in flows_timeseries.values():
+        if len(df) > 0:
+            if global_t0 is None:
+                global_t0 = float(df["start_s"].iloc[0])
+            else:
+                global_t0 = min(global_t0, float(df["start_s"].iloc[0]))
+    
+    if global_t0 is None:
+        return
+
+    for stream_id, df in flows_timeseries.items():
+        x = df["start_s"].to_numpy()
+        x_ms = (x - global_t0) * 1000.0
+        y = df["bin_packets"].to_numpy()
+
+        mask = (x_ms >= x_start) & (x_ms <= x_end)
+        x_ms = x_ms[mask]
+        y = y[mask]
+        
+        plt.plot(x_ms, y, linewidth=1.4, alpha=0.8, label=f"Flow {stream_id}")
+
+    ax = plt.gca()
+    ax.xaxis.set_major_locator(mticker.MultipleLocator(1))
+    ax.yaxis.set_major_locator(mticker.MultipleLocator(10))
+    ax.yaxis.set_minor_locator(mticker.MultipleLocator(5))
+
+    ax.minorticks_on()
+    ax.xaxis.set_minor_locator(mp.ticker.NullLocator())
+    ax.grid(True, which="major", axis="y", alpha=0.85, linestyle="--", linewidth=0.7)
+    ax.grid(True, which="minor", axis="y", alpha=0.35, linestyle="--", linewidth=0.5)
+
+    ax.yaxis.set_minor_formatter(mp.ticker.FormatStrFormatter('%d'))
+    ax.tick_params(axis="y", which="minor", length=3, width=0.8, labelsize=16)
+    ax.tick_params(axis="y", which="major", length=6, width=1.0, labelsize=20)
+    ax.tick_params(axis="x", which="major", length=6, width=1.0, labelsize=20)
+    ax.tick_params(axis="y", which="both", right=True, labelright=False)
+
+    plt.ylim(0, 35.1)
+    plt.xlim(x_start, x_end)
+    
+    plt.xlabel("Time elapsed (ms)")
+    plt.ylabel(f"Packets per {MICRO_BIN_US} µs bin")
+    
+    # Only show up to 10 items in legend to avoid cluttering
+    handles, labels = ax.get_legend_handles_labels()
+    plt.legend(handles[:10], labels[:10], loc='upper right', fontsize=12)
 
     _save_close(fig, out_path)
 
@@ -388,7 +469,7 @@ def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out
 
     ax.grid(True, which="major", axis="x", alpha=0.7, linestyle="--", linewidth=0.7)
 
-    if xlim:
+    if xlim and False:
         plt.xlim(1, xlim)
     plt.xlabel(xlabel)
     plt.ylabel("Cumulative Probability")
@@ -418,6 +499,13 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
         solutions, setup,
         setup_dir / f"timeseries_{MICRO_BIN_US}us.png",
     )
+
+    plot_flows_tso_pacing_timeseries(
+        solutions, setup,
+        setup_dir / f"timeseries_tso_pacing_all_flows_{MICRO_BIN_US}us.png"
+    )
+
+    return
 
     plot_cdf(
         solutions, setup, "per_flow_idt_us",
