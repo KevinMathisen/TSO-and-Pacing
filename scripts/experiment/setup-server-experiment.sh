@@ -54,7 +54,7 @@ fi
 tc qdisc replace dev "$DEV" root "$QDISC"
 
 # Set lower mtu to allow space for P4 timestamps
-sudo ip link set dev enp2s0np0 mtu 1480
+ip link set dev "$DEV" mtu 1480
 
 if [ "$CONNECTION_MODE" = "internet" ]; then 
     echo "Configured for Internet (cubic)"
@@ -63,6 +63,9 @@ elif [[ "$CONNECTION_MODE" = "datacenter" ]]; then
     echo "Configured for Datacenter (cubic)"
 
 else 
+    # since timestamp increase packet size, ensure we dont sendt too many packets and cause packet loss
+    tc qdisc replace dev "$DEV" root fq maxrate 2gbit
+
     echo "Configured for Direct-link (cubic)"
 
 fi
