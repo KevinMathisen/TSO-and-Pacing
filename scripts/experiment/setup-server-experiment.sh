@@ -53,6 +53,9 @@ fi
 
 tc qdisc replace dev "$DEV" root "$QDISC"
 
+# Set lower mtu to allow space for P4 timestamps
+sudo ip link set dev enp2s0np0 mtu 1480
+
 if [ "$CONNECTION_MODE" = "internet" ]; then 
     echo "Configured for Internet (cubic)"
 
