@@ -44,7 +44,7 @@ for mode in "${MODES[@]}"; do
 done
 
 # run experiment with fq_codel and direct link
-run_setup --direct-link --fq-codel "--$TREATMENT"
+run_setup --datacenter --fq-codel "--$TREATMENT"
 
 
 

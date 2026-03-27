@@ -17,7 +17,7 @@ SETUPS = [
     "direct-link_fq",
     "datacenter_fq",
     "internet_fq",
-    "direct-link_fq_codel",
+    "datacenter_fq_codel",
 ]
 # SETUPS = ["direct-link_fq"]
 
@@ -247,7 +247,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     # set ylim based on expected throughput
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
         ax_thr.set_ylim(8.6, 9.6)
-    elif setup == "datacenter_fq":
+    elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
         ax_thr.set_ylim(3.4, 4.4)
     elif setup == "internet_fq":
         ax_thr.set_ylim(0.8, 1.8)
@@ -275,7 +275,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     ax_rtt.set_title("RTT")
     ax_rtt.set_ylabel("RTT (ms)")
 
-    if setup in ["direct-link_fq", "direct-link_fq_codel", "datacenter_fq"]:
+    if setup in ["direct-link_fq", "datacenter_fq_codel", "datacenter_fq"]:
         ax_rtt.set_ylim(bottom=0)
     elif setup == "internet_fq":
         ax_rtt.set_ylim(bottom=20)
@@ -333,7 +333,7 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
     x_start, x_end = 0, FIRST_FLOW_TIMESERIES_MS
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
         x_start, x_end = 100, 103
-    elif setup == "datacenter_fq":
+    elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
         x_start, x_end = 100, 105
     elif setup == "internet_fq":
         x_start, x_end = 100, 108
@@ -387,7 +387,7 @@ def plot_flows_tso_pacing_timeseries(solutions: list[dict], setup: str, out_path
     x_start, x_end = 0, FIRST_FLOW_TIMESERIES_MS
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
         x_start, x_end = 200, 203
-    elif setup == "datacenter_fq":
+    elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
         x_start, x_end = 100, 105
     elif setup == "internet_fq":
         x_start, x_end = 100, 108

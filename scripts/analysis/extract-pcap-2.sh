@@ -23,7 +23,6 @@ done
 
 ts="$(date +%Y%m%d-%H%M)"
 RUN_DIR="./run-$ts"
-RUN_DIR="./run-20260326-1844"
 DUMP_DIR="$RUN_DIR/dump"
 AGG_DIR="$RUN_DIR/aggregates"
 
@@ -34,7 +33,7 @@ echo "Placing metrics and data in $RUN_DIR"
 echo ""
 echo "Retrieving logs and packet captures from $SERVER:$SERVER_DIR..."
 # Assume server only has directories we need, so copy all!
-# ssh "$SERVER" "cd $SERVER_DIR && tar -czf - ." | tar -xzf - -C "$DUMP_DIR/"
+ssh "$SERVER" "cd $SERVER_DIR && tar -czf - ." | tar -xzf - -C "$DUMP_DIR/"
 
 # For each of the predefined combinations
 RUN_TYPES=(
@@ -50,9 +49,9 @@ RUN_TYPES=(
   internet_fq_tso
   internet_fq_tso-pacing
 
-  direct-link_fq_codel_no-tso
-  direct-link_fq_codel_tso
-  direct-link_fq_codel_tso-pacing 
+  datacenter_fq_codel_no-tso
+  datacenter_fq_codel_tso
+  datacenter_fq_codel_tso-pacing 
 )
 
 for run_type in "${RUN_TYPES[@]}"; do
