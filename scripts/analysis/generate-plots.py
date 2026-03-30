@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 
 
-MICRO_BIN_US = 20
+MICRO_BIN_US = 50
 FIRST_FLOW_TIMESERIES_MS = 10
 
 SETUPS = [
@@ -31,6 +31,12 @@ COLORS = {
     "no-tso": "#009E73",
     "tso": "#E69F00",
     "tso-pacing": "#0072B2",
+}
+
+LINESTYLES = {
+    "no-tso": (0, (3, 1, 1, 1)),
+    "tso": (0, (5, 1)),
+    "tso-pacing": "solid",
 }
 
 plt.rcParams.update({
@@ -169,6 +175,7 @@ def load_solution(base_dir: Path, setup: str, solution: str) -> dict:
         "solution": solution,
         "label": SOLUTIONS[solution],
         "color": COLORS[solution],
+        "linestyle": LINESTYLES[solution],
         "dir": sol_dir,
         "packets": packets,
         "metrics": metrics,
@@ -221,6 +228,12 @@ def analyze_setup(base_dir: Path, setup: str) -> dict:
 def cdf_xy(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     x = np.sort(values)
     y = np.linspace(0, 1, len(x))
+
+    if len(x) > 100000:
+        step = len(x) // 100000
+        x = x[::step]
+        y = y[::step]
+
     return x, y
 
 def _save_close(fig, path: Path):
@@ -246,7 +259,7 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     
     # set ylim based on expected throughput
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
-        ax_thr.set_ylim(8.6, 9.6)
+        ax_thr.set_ylim(7, 8)
     elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
         ax_thr.set_ylim(3.4, 4.4)
     elif setup == "internet_fq":
@@ -350,18 +363,15 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
         
         # place tso pacing behind
         if sol["label"] == "TSO Pacing":
-            plt.plot(x_ms, y, label=sol["label"], color=sol["color"], linewidth=1.4, zorder=-1)
+            plt.plot(x_ms, y, label=sol["label"], color=sol["color"], linestyle=sol["linestyle"], linewidth=1.8, zorder=-1)
             plt.fill_between(x_ms, y, 0, color=sol["color"], alpha=0.22, linewidth=0)
         else:
-            plt.plot(x_ms, y, label=sol["label"], color=sol["color"], linewidth=1.4, zorder=1)
+            plt.plot(x_ms, y, label=sol["label"], color=sol["color"], linestyle=sol["linestyle"], linewidth=2, zorder=1)
 
     ax = plt.gca()
     ax.xaxis.set_major_locator(mticker.MultipleLocator(1))
-    ax.yaxis.set_major_locator(mticker.MultipleLocator(10))
-    ax.yaxis.set_minor_locator(mticker.MultipleLocator(5))
+    ax.yaxis.set_major_locator(mticker.MultipleLocator(5))
 
-    ax.minorticks_on()
-    ax.xaxis.set_minor_locator(mp.ticker.NullLocator())
     ax.grid(True, which="major", axis="y", alpha=0.85, linestyle="--", linewidth=0.7)
     ax.grid(True, which="minor", axis="y", alpha=0.35, linestyle="--", linewidth=0.5)
 
@@ -371,9 +381,8 @@ def plot_firstflow_timeseries(solutions: list[dict], setup: str, out_path: Path)
     ax.tick_params(axis="x", which="major", length=6, width=1.0, labelsize=20)
     ax.tick_params(axis="y", which="both", right=True, labelright=False)
 
-    plt.ylim(0, 35.1)
+    plt.ylim(0, 45)
     plt.xlim(x_start, x_end)
-    print(f"hello, {MICRO_BIN_US}!")
     plt.xlabel("Time elapsed (ms)")
     plt.ylabel(f"Packets per {MICRO_BIN_US} µs bin")
     # plt.title(f"Packet timeseries ({FIRST_FLOW_TIMESERIES_MS} ms)")
@@ -456,7 +465,12 @@ def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out
     for s in solutions:
         values = s[value_key]
         x, y = cdf_xy(values)
-        plt.plot(x, y, label=s["label"], color=s["color"], linewidth=2)
+
+        if s["label"] == "TSO Pacing":
+            plt.plot(x, y, label=s["label"], color=s["color"], linestyle=s["linestyle"], linewidth=2, zorder=-1)
+        else:
+            plt.plot(x, y, label=s["label"], color=s["color"], linestyle=s["linestyle"], linewidth=2, zorder=1)
+
 
     ax = plt.gca()
     ax.set_xscale("log")
@@ -469,6 +483,7 @@ def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out
 
     ax.grid(True, which="major", axis="x", alpha=0.7, linestyle="--", linewidth=0.7)
 
+    plt.xlim(left=1)
     if xlim and False:
         plt.xlim(1, xlim)
     plt.xlabel(xlabel)
@@ -504,8 +519,6 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
         solutions, setup,
         setup_dir / f"timeseries_tso_pacing_all_flows_{MICRO_BIN_US}us.png"
     )
-
-    return
 
     plot_cdf(
         solutions, setup, "per_flow_idt_us",
