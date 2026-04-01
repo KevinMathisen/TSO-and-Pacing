@@ -259,15 +259,16 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     
     # set ylim based on expected throughput
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
-        ax_thr.set_ylim(7, 8)
+        ax_thr.set_ylim(7.5, 8)
     elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
-        ax_thr.set_ylim(3.4, 4.4)
+        ax_thr.set_ylim(3.5, 4)
     elif setup == "internet_fq":
-        ax_thr.set_ylim(0.8, 1.8)
+        ax_thr.set_ylim(1.4, 1.9)
 
     ax_thr.set_title("Throughput")
     ax_thr.set_ylabel("Throughput (Gbps)")
     ax_thr.grid(True, axis="y", linestyle="--", alpha=0.5)
+    ax_thr.yaxis.set_major_locator(mticker.MultipleLocator(0.1))
 
     # RTT
     rtt_data = [(sol["rtts"] / 1000.0) for sol in solutions]  # us -> ms
@@ -277,6 +278,8 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
         widths=0.6,
         patch_artist=True,
         labels=labels,
+        whis=[5,95],
+        showfliers=False,
     )
 
     for i, sol in enumerate(solutions):
@@ -288,10 +291,20 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     ax_rtt.set_title("RTT")
     ax_rtt.set_ylabel("RTT (ms)")
 
-    if setup in ["direct-link_fq", "datacenter_fq_codel", "datacenter_fq"]:
-        ax_rtt.set_ylim(bottom=0)
+    if setup in ["datacenter_fq_codel", "datacenter_fq"]:
+        ax_rtt.set_ylim(bottom=2)
+    elif setup == "direct-link_fq":
+        ax_rtt.set_ylim(bottom=2)
     elif setup == "internet_fq":
         ax_rtt.set_ylim(bottom=20)
+
+    if setup in ["direct-link_fq", "direct-link_fq_codel"]:
+        ax_rtt.yaxis.set_major_locator(mticker.MultipleLocator(1))
+    elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
+        ax_rtt.yaxis.set_major_locator(mticker.MultipleLocator(2))
+    elif setup == "internet_fq":
+        ax_rtt.yaxis.set_major_locator(mticker.MultipleLocator(5))
+
 
     ax_rtt.grid(True, axis="y", linestyle="--", alpha=0.5)
 
@@ -326,6 +339,11 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
     ax_receiver.set_title("Receiver CPU")
 
     ax_sender.set_ylabel("Average CPU usage (%)")
+    ax_receiver.set_ylabel("Average CPU usage (%)")
+
+    if setup in ["direct-link_fq", "direct-link_fq_codel"]:
+        ax_sender.yaxis.set_major_locator(mticker.MultipleLocator(1))
+        ax_receiver.yaxis.set_major_locator(mticker.MultipleLocator(5))
 
     ax_sender.grid(True, axis="y", linestyle="--", alpha=0.5)
     ax_receiver.grid(True, axis="y", linestyle="--", alpha=0.5)
