@@ -55,6 +55,8 @@ tc qdisc replace dev "$DEV" root "$QDISC"
 
 # Set lower mtu to allow space for P4 timestamps
 ip link set dev "$DEV" mtu 1480
+# use cake to minimize bursts
+tc qdisc replace dev "$DEV" root cake besteffort flows no-split-gso
 
 if [ "$CONNECTION_MODE" = "internet" ]; then 
     echo "Configured for Internet (cubic)"
