@@ -290,34 +290,8 @@ If you get strange and inconsistent results, always remember to check if it is t
 #### General tips
 In general when working on these cards it is very important to work iteratively. Make small modifications and check if it behaves as expected. Use debug to check if values make sense.
 
-Also, remember to read the actual Netronome documentation (ask me if you dont have access to this), and read through the original firmware to understand how Micro-C and the Agilio CX architecture works.
+Also, remember to read the actual Netronome documentation (ask me if you dont have access to this), and read through the original firmware to understand how Micro-C and the Agilio CX architecture works. For `notify.c`, one of the first things I did was to read though the whole file and write comments to understand how it worked. `notify.c` with my comments is [here](modified-nfd-firmware/misc/notify-with-comments.c)
 ---
-
----
-
-## IFI Subject recommendations
-Recommendations for other students working on the Netronome cards at IFI. Independent of what courses you take, you should preferably have experience with networking, low-level programming, and concurrent programming.
-
-**IN5050 – Programming heterogeneous multi-core architectures**
-Fun and educational course. A lot of practial programming (as opposed to many other IFI courses...). Good practice for writing reports, troubleshooting, and benchmarking. Also good for low-level programming/hardware architecture, which is essential for working on the Netronome Cards.
-And no final exam! Only 3 reports during the semester.
-
-**IN5170 – Models of Concurrency** 
-This course is all right, decent lecturers and a decent workload. Exam was relatively easy (ask me for previous exams for practice if you want, they dont publish them for some reason).
-Good for gaining intuitive understanding of concurrency, deadlocks, and synchronization mechanisms, and practical real-world implementations of these (Java, Golang <3, and Rust) (also brief mention of Erland :( and C#)).
-Also, only 2 small obligs the whole semester, each took only one afternoon to complete! 
-
-**IN5060 – Quantitative Performance Analysis**
-Not that technical, but good practice for handling and anlysing data sets for research purposes, visualizing data/results, and presenting this for a crowd. 
-
-**IN4230 – Computer Networks** 
-Course I proabably should have taken. Introduction to networks (in detail), and especially relevant in that you program network protocols in C. Very relevant for both driver and firmware modifications for the netronome cards.
-
-**IN4120 – Search Technology** 
-Good course+lecturer, fun exercises, however not *that* relevant to the thesis. Covers lot of different topics within search engines which can also be applied in other fields (compression, data stuctures, fun text handling, vectors/embedding of language/text, basic machine learning)
-
-(Also, use [karakterweb](https://www.karakterweb.no/) to see difficulty and ratings of IFI subjects)
-
 
 
 ## Misc
@@ -356,6 +330,40 @@ chmod +x ~/opt/bpftrace/bpftrace
 # then use installed bpdtrace with specific script:
 sudo ~/opt/bpftrace/squashfs-root/AppRun ~/master/TSO-and-Pacing/scripts/experiment/record_qlen_ifb.bt
 ```
+
+### Overview of relevant repositories:
+- [Agilio CX Firmware](https://github.com/Netronome/nic-firmware)
+  - [Firmware for kernel 5.4](https://github.com/Netronome/nic-firmware/releases/tag/nic-2.1.16.1)
+- [Agilio CX Firmware for NFD_IN specifically](https://github.com/Netronome/nfd)
+- [Agilio CX Drivers](https://github.com/Netronome/nfp-drv-kmods)
+- [Atle's repo](https://github.com/atleikan/pace-tso)
+- [Per Magne's repo](https://github.com/Permki/PacedLinux)
+- [My overleaf document](https://www.overleaf.com/read/ppbcztrrzddp#2feaa4)
+
+### IFI Subject recommendations
+Recommendations for other students working on the Netronome cards at IFI. Independent of what courses you take, you should preferably have experience with networking, low-level programming, and concurrent programming.
+
+**IN5050 – Programming heterogeneous multi-core architectures**
+Fun and educational course. A lot of practial programming (as opposed to many other IFI courses...). Good practice for writing reports, troubleshooting, and benchmarking. Also good for low-level programming/hardware architecture, which is essential for working on the Netronome Cards.
+And no final exam! Only 3 reports during the semester.
+
+**IN5170 – Models of Concurrency** 
+This course is all right, decent lecturers and a decent workload. Exam was relatively easy (ask me for previous exams for practice if you want, they dont publish them for some reason).
+Good for gaining intuitive understanding of concurrency, deadlocks, and synchronization mechanisms, and practical real-world implementations of these (Java, Golang <3, and Rust) (also brief mention of Erland :( and C#)).
+Also, only 2 small obligs the whole semester, each took only one afternoon to complete! 
+
+**IN5060 – Quantitative Performance Analysis**
+Not that technical, but good practice for handling and anlysing data sets for research purposes, visualizing data/results, and presenting this for a crowd. 
+
+**IN4230 – Computer Networks** 
+Course I proabably should have taken. Introduction to networks (in detail), and especially relevant in that you program network protocols in C. Very relevant for both driver and firmware modifications for the netronome cards.
+
+**IN4120 – Search Technology** 
+Good course+lecturer, fun exercises, however not *that* relevant to the thesis. Covers lot of different topics within search engines which can also be applied in other fields (compression, data stuctures, fun text handling, vectors/embedding of language/text, basic machine learning)
+
+(Also, use [karakterweb](https://www.karakterweb.no/) to see difficulty and ratings of IFI subjects)
+
+
 
 # Other questions
 If you have any questions I am more than happy to help. Just send me an email at kevin.nikolai.mathisen@gmail.com
