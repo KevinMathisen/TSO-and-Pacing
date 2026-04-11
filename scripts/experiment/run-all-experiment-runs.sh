@@ -31,7 +31,7 @@ run_setup () {
   echo "============================================================"
 
   for ((i=1; i<=RUNS_PER_SETUP; i++)); do
-    ./run-experiment-2.sh --run-num "$i" "$mode" "$qdisc" "$treatment"
+    ./run-experiment-external-capture.sh --run-num "$i" "$mode" "$qdisc" "$treatment"
     sleep 5
   done
 }
@@ -43,7 +43,7 @@ for mode in "${MODES[@]}"; do
   run_setup "$mode" --fq "--$TREATMENT"
 done
 
-# run experiment with fq_codel and direct link
+# run experiment with fq_codel and datacenter
 run_setup --datacenter --fq-codel "--$TREATMENT"
 
 
