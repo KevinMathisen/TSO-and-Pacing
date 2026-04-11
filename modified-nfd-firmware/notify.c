@@ -927,6 +927,9 @@ do {                                                                         \
                 } else {                                                     \
                     __critical_path();                                       \
                     flows_prev_dep_time[flow_id] = dep_time;                 \
+                    /* Note: updating prev deptime only at end of TSO batch*/\
+                    /*       causes problems, so update for each TSO desc */ \
+                    /*       (dep_time may not keep up with cur_time)*/      \
                 }                                                            \
                                                                              \
                 /* Find desired (CTM) slot to enqueue in relation to head */ \
