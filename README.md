@@ -291,7 +291,6 @@ If you get strange and inconsistent results, always remember to check if it is t
 In general when working on these cards it is very important to work iteratively. Make small modifications and check if it behaves as expected. Use debug to check if values make sense.
 
 Also, remember to read the actual Netronome documentation (ask me if you dont have access to this), and read through the original firmware to understand how Micro-C and the Agilio CX architecture works. For `notify.c`, one of the first things I did was to read though the whole file and write comments to understand how it worked. `notify.c` with my comments is [here](modified-nfd-firmware/misc/notify-with-comments.c)
----
 
 
 ## Misc
