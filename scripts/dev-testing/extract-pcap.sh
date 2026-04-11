@@ -65,9 +65,9 @@ echo "Generating metrics from csv"
 cd "$RUN_DIR"
 
 if [ $# -eq 1 ]; then
-  python3 ./../../analyze_tcp_capture.py "$1"
+  python3 ./../../generate-plots-single-flow-it.py "$1"
 else
-  python3 ./../../analyze_tcp_capture.py
+  python3 ./../../generate-plots-single-flow-it.py
 fi
 
 echo ""
