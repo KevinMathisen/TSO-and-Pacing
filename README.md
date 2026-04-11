@@ -1,5 +1,5 @@
 # TSO-and-Pacing-on-modified-Netronome-Firmware
-A modification of Netronome Agilio CX 4000 firmware (CoreNIC) to support TSO Pacing. Developed for a master thesis at UiO.
+A modification of Netronome Agilio CX 4000 firmware (CoreNIC) to support TSO Pacing. Developed for a master's thesis at UiO.
 
 The repository contains:
  1. Modifications to the [Agilio CX Firmware](https://github.com/Netronome/nic-firmware), found in [`notify.c`](modified-nfd-firmware/notify.c)
@@ -16,11 +16,11 @@ Requirements for development and testing at the UiO IFI setup:
 ![uio-ifi-setup](./docs/build-env.png)
 
 #### Server 1 (Netronome 2)
-For compiling the modified NFP driver and CoreNIC firmware a machine with the following is needed:
+To compile the modified NFP driver and CoreNIC firmware a machine with the following is required:
 - A Netronome Agilio CX 4000 SmartNIC 2x10GbE
 - Ubuntu 18.04, with Linux kernel 5.4
 - NFP Kernel drivers (should come preinstalled with Ubuntu 18.04)
-- Netronome’s NFP Linux Toochain
+- Netronome’s NFP Linux Toolchain
   - Can be retrieved by asking Netronome, as outlined [here](https://github.com/Netronome/nic-firmware?tab=readme-ov-file#toolchain-and-reference-manuals).
 - GNU awk
   - `apt-get install gawk`
@@ -33,15 +33,15 @@ For compiling the modified NFP driver and CoreNIC firmware a machine with the fo
   - `iperf3`, `ethtool`
 
 #### Server 2 (Netronome 1)
-Also, for running the test you need a machine with another Agilio CX SmartNIC, directly attached to the one we are modifying:
+To run the tests, you also need a machine with another Agilio CX SmartNIC, directly attached to the one we are modifying:
 - A Netronome Agilio CX 4000 SmartNIC 2x10GbE
 - Ubuntu 18.04, with Linux kernel 5.4
 - `netsniff-ng`, `iperf3`, `mergecap`, `cpufrequtils`, `ethtool`
-- If want to record queue lengths, see how to install bpftrace [here](#install-newer-bpdtrace).
+- If you want to record queue lengths, see how to install bpftrace [here](#install-newer-bpftrace).
 
 #### PC
-And a personal machine for generating plots based on the packet captures from tests:
-- Ssh access to server 2
+You also need a personal machine for generating plots based on the packet captures from tests:
+- Ssh access to Server 2
 - `tshark`
 - `python3` (pandas, numpy, matplotlib)
 
@@ -51,28 +51,28 @@ Requirements for running experiments at the Darmstadt setup with hardware timest
 ![uio-ifi-setup](./docs/experiment-testbed.png)
 
 #### Server 1 (Server)
-Same as server 1 from development environment.
+Same as Server 1 from development environment.
 - A Netronome Agilio CX 4000 SmartNIC 2x10GbE
 - Ubuntu 18.04, with Linux kernel 5.4
 - If you want to test with Cake, it should come preinstalled with kernel 5.4, however it might not be recognized by `tc`. If so, follow [this guide](#install-tc-which-recognizes-cake). 
-- Rest is same as server 1
+- Rest is same as Server 1
 
 #### Server 2 (Client)
-More lightweight than server 2 from development environment. Can be used for packet capture as well.
+More lightweight than Server 2 from development environment. Can be used for packet capture as well.
 - A Netronome Agilio CX 4000 SmartNIC 2x10GbE
 - Ubuntu 18.04, with Linux kernel 5.4
 - `dumpcap`, `iperf3`, `cpufrequtils`, `ethtool`
-- If want to record queue lengths, see how to install bpftrace [here](#install-newer-bpdtrace).
+- If you want to record queue lengths, see how to install bpftrace [here](#install-newer-bpftrace).
 
 #### External Host
-Adminitered/configured by our friends at Darmstadt.
+Administered/configured by our friends at Darmstadt.
 
 #### Tofino
-Adminitered/configured by our friends at Darmstadt.
+Administered/configured by our friends at Darmstadt.
 
 
 ## Modifying the NFP driver and CoreNIC firmware
-The NFP drivers can be modified by changing the files in the NFP driver directory you installed, then compiling it. The [`nfp_net_common.c`](modified-nfd-driver/nfp_net_common.c) file contains our modifications to the driver, and can be copied to the oot NDF driver as follows:
+The NFP drivers can be modified by changing the files in the NFP driver directory you installed, then compiling it. The [`nfp_net_common.c`](modified-nfd-driver/nfp_net_common.c) file contains our modifications to the driver, and can be copied to the out-of-tree NDF driver as follows:
 ```bash
 cp ./modified-nfd-driver/nfp_net_common.c $HOME/master/modified-nfp-oot-driver-2019/src/
 ```
@@ -87,14 +87,14 @@ To compile and load modified drivers and firmware, the [`build-nfp.sh`](scripts/
 
 First, modify its variables to reflect your environment. 
 
-If wanted, the script can switch between modified and the original drivers/firmware. To do this, you should have copies of the unmodified driver and firmware, and provide the path to these in the script. 
+If wanted, the script can switch between modified and original drivers/firmware. To do this, you should have copies of the unmodified driver and firmware, and provide the path to these in the script. 
 
 Running the build script:
 ```bash
 sudo ./build-nfp.sh
 ```
 
-The build script can be ran with the following options
+The build script can be run with the following options
 - `--help`
 - `--skip-fw/--skip-driver/--skip-check`
   - Skips build & install for this part
@@ -107,7 +107,7 @@ The build script can be ran with the following options
   - By default this skips building, to prevent rebuilding the same drivers/fimware here. When running for the first time, you need to explicitly build here (by modifying the script or running the commands yourself).
 
 ### Configuring the Netronome interface
-Set the IP address (as the IP address might disapear after loading updated drivers. Alternatively, you can add a netplan file to set `enp2s0np0` to a static ip). 
+Set the IP address (as the IP address might disappear after loading updated drivers. Alternatively, you can add a netplan file to set `enp2s0np0` to a static ip). 
 ```bash
 # (example ip, use what is defined for the setup)
 sudo ip addr add 192.168.50.1/24 dev enp2s0np0
@@ -216,7 +216,7 @@ To analyze from own computer:
 ./extract-pcap-experiment.sh
 ```
 
-#### Only metrics and glens
+#### Only metrics and qlens
 To only get the metrics and queue lengths (no packet capture) you can use `run-experiment-no-capture.sh`.
 You can also modify `run-all-experiment-runs.sh` to use this.
 
@@ -231,7 +231,7 @@ RAW_CSV="$TMP_DIR/tshark_raw.csv"
 PARSED_CSV="$TMP_DIR/packets_parsed.csv"
 
 echo "    $run_type: Extracting fields with thark..."
-# Convert pcap to csv using thsark to extract following for timestamp analysis
+# Convert pcap to csv using tshark to extract following for timestamp analysis
 tshark -n -r "$PCAP_IN" \
   -T fields -E header=y -E separator=, -E quote=d \
   -o tcp.desegment_tcp_streams:FALSE \
@@ -246,7 +246,7 @@ tshark -n -r "$PCAP_IN" \
 
 echo "    $run_type: Parsing p4sta timestamps..."
 # Run parse-p4sta-timestamps.py to extract timestamps from tcp payload
-# payload -> extract first 48 bit timestamp by finding signature 0x0f in tcp options, then extacting 48 bit
+# payload -> extract first 48 bit timestamp by finding signature 0x0f in tcp options, then extracting 48 bit
 python3 parse-p4sta-timestamps.py "$RAW_CSV" "$PARSED_CSV" "$RUN_NAME" "$run_num"
 # Resulting csv contains: run_name,run_num,stream_id,tcp_len,p4_timestamp_ns
 
@@ -257,9 +257,9 @@ mv "$PARSED_CSV.sorted" "$PARSED_CSV"
 
 
 ## Help, nothing works! 
-So, you want to modify and compile custom drivers+firmware for the Agilio CX... and this are not working? Here are at least some problems I encountered and how I solved them:
+So, you want to modify and compile custom drivers+firmware for the Agilio CX... and things are not working? Here are at least some problems I encountered and how I solved them:
 
-#### Hardware not recoginized
+#### Hardware not recognized
 Sometimes (seemingly at random) the NFP driver load fails. This can be seen by... the fact that the interface does not work, e.g. you can't ping the other netronome card.
 ```bash
 dmesg | grep nfp | tail -n 300
@@ -282,7 +282,7 @@ The solution? Reboot the machine (and possibly rebuild and load the firmware). D
 #### Card stops transmission
 A reason for the card freezing is if the `halt()` command runs in Notify, or if there is a deadlock (i.e. the threads are waiting for signals which are never raised.)
 
-Try to place debug statements to find out if these are your culprint.
+Try to place debug statements to find out if these are your culprit.
 
 #### Strange results / random packet loss
 If you get strange and inconsistent results, always remember to check if it is the testbed and not the solution. E.g. you could forget to reset the receiver after an experiment. 
@@ -290,7 +290,7 @@ If you get strange and inconsistent results, always remember to check if it is t
 #### General tips
 In general when working on these cards it is very important to work iteratively. Make small modifications and check if it behaves as expected. Use debug to check if values make sense.
 
-Also, remember to read the actual Netronome documentation (ask me if you dont have access to this), and read through the original firmware to understand how Micro-C and the Agilio CX architecture works. For `notify.c`, one of the first things I did was to read though the whole file and write comments to understand how it worked. `notify.c` with my comments is [here](modified-nfd-firmware/misc/notify-with-comments.c)
+Also, remember to read the actual Netronome documentation (ask me if you don't have access to this), and read through the original firmware to understand how Micro-C and the Agilio CX architecture works. For `notify.c`, one of the first things I did was to read though the whole file and write comments to understand how it worked. `notify.c` with my comments is [here](modified-nfd-firmware/misc/notify-with-comments.c)
 
 
 ## Misc
@@ -317,8 +317,8 @@ sudo modprobe sch_cake
 sudo tc qdisc replace dev enp2s0np0 root cake bandwidth 1gbit besteffort flows
 ```
 
-### Install newer bpdtrace
-Kernel 5.4 has an old bpdtrace version. To install and use newer version (this worked for me):
+### Install newer bpftrace
+Kernel 5.4 has an old bpftrace version. To install and use newer version (this worked for me):
 ```bash
 mkdir -p ~/opt/bpftrace
 cd ~/opt/bpftrace
@@ -326,7 +326,7 @@ curl -fL -o ~/opt/bpftrace/bpftrace   https://github.com/bpftrace/bpftrace/relea
 chmod +x ~/opt/bpftrace/bpftrace
 ./bpftrace --appimage-extract
 
-# then use installed bpdtrace with specific script:
+# then use installed bpftrace with specific script:
 sudo ~/opt/bpftrace/squashfs-root/AppRun ~/master/TSO-and-Pacing/scripts/experiment/record_qlen_ifb.bt
 ```
 
@@ -347,18 +347,18 @@ Fun and educational course. A lot of practial programming (as opposed to many ot
 And no final exam! Only 3 reports during the semester.
 
 **IN5170 – Models of Concurrency** 
-This course is all right, decent lecturers and a decent workload. Exam was relatively easy (ask me for previous exams for practice if you want, they dont publish them for some reason).
+This course is all right, decent lecturers and a decent workload. Exam was relatively easy (ask me for previous exams for practice if you want, they don't publish them for some reason).
 Good for gaining intuitive understanding of concurrency, deadlocks, and synchronization mechanisms, and practical real-world implementations of these (Java, Golang <3, and Rust) (also brief mention of Erland :( and C#)).
 Also, only 2 small obligs the whole semester, each took only one afternoon to complete! 
 
 **IN5060 – Quantitative Performance Analysis**
-Not that technical, but good practice for handling and anlysing data sets for research purposes, visualizing data/results, and presenting this for a crowd. 
+Not that technical, but good practice for handling and analyzing data sets for research purposes, visualizing data/results, and presenting this for a crowd. 
 
 **IN4230 – Computer Networks** 
-Course I proabably should have taken. Introduction to networks (in detail), and especially relevant in that you program network protocols in C. Very relevant for both driver and firmware modifications for the netronome cards.
+Course I probably should have taken. Introduction to networks (in detail), and especially relevant in that you program network protocols in C. Very relevant for both driver and firmware modifications for the netronome cards.
 
 **IN4120 – Search Technology** 
-Good course+lecturer, fun exercises, however not *that* relevant to the thesis. Covers lot of different topics within search engines which can also be applied in other fields (compression, data stuctures, fun text handling, vectors/embedding of language/text, basic machine learning)
+Good course+lecturer, fun exercises, however not *that* relevant to the thesis. Covers lot of different topics within search engines which can also be applied in other fields (compression, data structures, fun text handling, vectors/embedding of language/text, basic machine learning)
 
 (Also, use [karakterweb](https://www.karakterweb.no/) to see difficulty and ratings of IFI subjects)
 
