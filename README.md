@@ -1,9 +1,21 @@
 # TSO-and-Pacing-on-modified-Netronome-Firmware
-A modification of Netronome Agilio CX 4000 firmware (CoreNIC) to support TSO and Pacing. Developed for a master thesis at UiO.
+A modification of Netronome Agilio CX 4000 firmware (CoreNIC) to support TSO Pacing. Developed for a master thesis at UiO.
+
+The repository contains:
+ 1. Modifications to the [Agilio CX Firmware](https://github.com/Netronome/nic-firmware), found in [`notify.c`](modified-nfd-firmware/notify.c)
+ 2. Modifications to the [Agilio CX Drivers](https://github.com/Netronome/nfp-drv-kmods), found in [`nfp_net_common.c`](modified-nfd-driver/nfp_net_common.c)
+ 3. Scripts for building the modified drivers and firmware
+ 4. Scripts for development and testing at the UiO IFI setup
+ 5. Scripts for running experiments and analyzing the results for the Darmstadt setup
 
 ## Requirements
 
-#### Server 1
+### Development environment
+Requirements for development and testing at the UiO IFI setup:
+
+![uio-ifi-setup](./docs/build-env.png)
+
+#### Server 1 (Netronome 2)
 For compiling the modified NFP driver and CoreNIC firmware a machine with the following is needed:
 - A Netronome Agilio CX 4000 SmartNIC 2x10GbE
 - Ubuntu 18.04, with Linux kernel 5.4
@@ -20,17 +32,44 @@ For compiling the modified NFP driver and CoreNIC firmware a machine with the fo
 - (For testing)
   - `iperf3`, `ethtool`
 
-#### Server 2
+#### Server 2 (Netronome 1)
 Also, for running the test you need a machine with another Agilio CX SmartNIC, directly attached to the one we are modifying:
 - A Netronome Agilio CX 4000 SmartNIC 2x10GbE
 - Ubuntu 18.04, with Linux kernel 5.4
 - `netsniff-ng`, `iperf3`, `mergecap`, `cpufrequtils`, `ethtool`
+- If want to record queue lengths, see how to install bpftrace [here](#install-newer-bpdtrace).
 
 #### PC
 And a personal machine for generating plots based on the packet captures from tests:
 - Ssh access to server 2
 - `tshark`
 - `python3` (pandas, numpy, matplotlib)
+
+### Experiment environment
+Requirements for running experiments at the Darmstadt setup with hardware timestamping:
+
+![uio-ifi-setup](./docs/experiment-testbed.png)
+
+#### Server 1 (Server)
+Same as server 1 from development environment.
+- A Netronome Agilio CX 4000 SmartNIC 2x10GbE
+- Ubuntu 18.04, with Linux kernel 5.4
+- If you want to test with Cake, it should come preinstalled with kernel 5.4, however it might not be recognized by `tc`. If so, follow [this guide](#install-tc-which-recognizes-cake). 
+- Rest is same as server 1
+
+#### Server 2 (Client)
+More lightweight than server 2 from development environment. Can be used for packet capture as well.
+- A Netronome Agilio CX 4000 SmartNIC 2x10GbE
+- Ubuntu 18.04, with Linux kernel 5.4
+- `dumpcap`, `iperf3`, `cpufrequtils`, `ethtool`
+- If want to record queue lengths, see how to install bpftrace [here](#install-newer-bpdtrace).
+
+#### External Host
+Adminitered/configured by our friends at Darmstadt.
+
+#### Tofino
+Adminitered/configured by our friends at Darmstadt.
+
 
 ## Modifying the NFP driver and CoreNIC firmware
 The NFP drivers can be modified by changing the files in the NFP driver directory you installed, then compiling it. The [`nfp_net_common.c`](modified-nfd-driver/nfp_net_common.c) file contains our modifications to the driver, and can be copied to the oot NDF driver as follows:
@@ -48,17 +87,17 @@ To compile and load modified drivers and firmware, the [`build-nfp.sh`](scripts/
 
 First, modify its variables to reflect your environment. 
 
-If wanted, the script can switch between modified and the original drivers/firmware. To do this, you should have copies of the un-modified driver and firmware, and provide the path to these in the script. 
+If wanted, the script can switch between modified and the original drivers/firmware. To do this, you should have copies of the unmodified driver and firmware, and provide the path to these in the script. 
 
 Running the build script:
 ```bash
-sudo build-nfp.sh
+sudo ./build-nfp.sh
 ```
 
 The build script can be ran with the following options
 - `--help`
 - `--skip-fw/--skip-driver/--skip-check`
-  - Skips build/install for this part
+  - Skips build & install for this part
 - ` --skip-build `
   - skips building, just loads
 - `--clean`
@@ -68,8 +107,9 @@ The build script can be ran with the following options
   - By default this skips building, to prevent rebuilding the same drivers/fimware here. When running for the first time, you need to explicitly build here (by modifying the script or running the commands yourself).
 
 ### Configuring the Netronome interface
-Set the IP address (as the IP address might disapear after loading updated drivers. Alternatively, you can add a netplan file to set `enp2s0np0` to a static ip).
+Set the IP address (as the IP address might disapear after loading updated drivers. Alternatively, you can add a netplan file to set `enp2s0np0` to a static ip). 
 ```bash
+# (example ip, use what is defined for the setup)
 sudo ip addr add 192.168.50.1/24 dev enp2s0np0
 
 # Confirm with:
@@ -111,7 +151,7 @@ Log/print statements from NFP driver:
 dmesg | grep nfp
 ```
 
-### Running test
+### Running test in development environment
 To run a test, run the [`run-tcp-test.sh`](scripts/run-tcp-test.sh) script on Server 2:
 ```bash
 sudo ./run-tcp-test.sh
@@ -123,9 +163,101 @@ This generates a packet capture, which can be extracted by running the [`extract
 sudo ./extract-pcap.sh
 ```
 
+### Running tests in Darmstadt environment
+We have 4 scenarios/setups for testing, where we can test all at once with `run-all-experiment-runs.sh`:
+- Direct link with FQ
+- Datacenter with FQ
+- Internet with FQ
+- Datacenter with FQ_Codel
+
+We also compare 3 different solutions:
+- No TSO
+- TSO
+- TSO Pacing (our custom solution)
+
+Before running tests, you can remove old run data:
+```bash
+cd ./scripts/experiment
+sudo rm -r ./runs/
+```
+
+Run a single experiment (to check if everything works as expected):
+```bash
+sudo ./run-experiment-external-capture.sh --run-num 0 --direct-link --fq --no-tso
+```
+
+If everything looks good, you can move on.
+
+#### Running all tests
+To run all tests, we use the script `run-all-experiment-runs.sh`. Before running it, we have to load the unmodified or modified Agilio CX driver and firmware:
+```bash
+# Start with standard solution (assume org driver/firmware previously built)
+sudo build-nfp.sh --org
+sudo ./oslo_v1.sh up
+
+# Run all tests for no-tso
+sudo run-all-experiment-runs.sh --no-tso
+
+# Run all tests for tso
+sudo run-all-experiment-runs.sh --tso
+
+
+# Load custom solution (again assume modified driver/firmware previously built)
+sudo build-nfp.sh --skip-build
+
+# Run all tests for tso pacing
+sudo run-all-experiment-runs.sh --tso-pacing
+```
+
+Now all runs should be placed in `./scripts/experiment/runs/`.
+
+To analyze from own computer:
+```bash
+./extract-pcap-experiment.sh
+```
+
+#### Only metrics and glens
+To only get the metrics and queue lengths (no packet capture) you can use `run-experiment-no-capture.sh`.
+You can also modify `run-all-experiment-runs.sh` to use this.
+
+#### Capture on client
+To capture packets on the client (e.g. if external capture is not available), you can use `run-experiment-client-capture.sh`.
+You will however have to analyze the pcap manually then, as the current `./extract-pcap-experiment.sh` assumes that `runs/` has timestamp csv files. 
+
+To analyze a pcap file with `./extract-pcap-experiment.sh`, you can use something like this (by replacing the current lines using `parse-raw-timestamps.py`):
+```bash
+PCAP_IN="$(find "$RUN_PATH" -maxdepth 1 -name 'capture_*.pcapng' | head -n1)"
+RAW_CSV="$TMP_DIR/tshark_raw.csv"
+PARSED_CSV="$TMP_DIR/packets_parsed.csv"
+
+echo "    $run_type: Extracting fields with thark..."
+# Convert pcap to csv using thsark to extract following for timestamp analysis
+tshark -n -r "$PCAP_IN" \
+  -T fields -E header=y -E separator=, -E quote=d \
+  -o tcp.desegment_tcp_streams:FALSE \
+  -o ip.defragment:FALSE -o ipv6.defragment:FALSE \
+  -o tcp.check_checksum:FALSE \
+  -e frame.time_epoch -e frame.number \
+  -e tcp.stream -e tcp.seq -e tcp.len \
+  -e tcp.analysis.retransmission -e tcp.analysis.fast_retransmission \
+  -e tcp.analysis.out_of_order -e tcp.analysis.lost_segment \
+  -e data.data \
+  > "$RAW_CSV"
+
+echo "    $run_type: Parsing p4sta timestamps..."
+# Run parse-p4sta-timestamps.py to extract timestamps from tcp payload
+# payload -> extract first 48 bit timestamp by finding signature 0x0f in tcp options, then extacting 48 bit
+python3 parse-p4sta-timestamps.py "$RAW_CSV" "$PARSED_CSV" "$RUN_NAME" "$run_num"
+# Resulting csv contains: run_name,run_num,stream_id,tcp_len,p4_timestamp_ns
+
+# Ensure packets are sorted (column 5 has timestamp)
+{ head -n1 "$PARSED_CSV"; tail -n +2 "$PARSED_CSV" | LC_ALL=C sort -t, -k5,5n; } > "$PARSED_CSV.sorted"
+mv "$PARSED_CSV.sorted" "$PARSED_CSV"
+```
+
 
 ## Help, nothing works! 
-So, you want to modify and compile custom drivers+firmware for a 10 Gbps SmartNIC. And nothing works? Here are some common pitfalls I encountered at least.
+So, you want to modify and compile custom drivers+firmware for the Agilio CX... and this are not working? Here are at least some problems I encountered and how I solved them:
 
 #### Hardware not recoginized
 Sometimes (seemingly at random) the NFP driver load fails. This can be seen by... the fact that the interface does not work, e.g. you can't ping the other netronome card.
@@ -147,31 +279,24 @@ HFInfo is something the ARM firmware on netronome card builds after the chip res
 
 The solution? Reboot the machine (and possibly rebuild and load the firmware). Do this as many times it takes. I have found no other way to fix the issue, where resetting (or unbind/binding) the card does not work. 
 
-#### Random behavior
-Hopefully I will be able to fix this. If not I am sorry.
-
-The current solution works perfectly, as long as you dont load the NFP module with `nfp_dev_cpp=1`. For some reason, when using `nfp_dev_cpp`, it interacts with our pacing solution and causes it to randomly drop packets, reduce the time wheel's throughput, and eventually cause a complete loss of transmissions. 
-
-This seems to happen per-flow, so for multiple active flows, only one may excibit this behavior at first, with the others following later (up to several seconds, millions of packets, later). Other times all flows imediatelly stop sending data. When trying to ping after e.g. 4 flows causes their transmission to stop, sometimes it works, sometimes not. 
-Other times the solution works as expected (for several hours) even with `nfp_dev_cpp`, but this is only 1 out of 10 runs. 
-
-The per-flow behavior seems to indicate that `nfp_dev_cpp` somehow interacts with the per-flow state, either in the driver or firmware, which causes the erratic behavior. 
-
-So far, our only solution is to disable `nfp_dev_cpp`. This of course prevents you from reading the memory of the NIC. 
-
-(Can also mention that is it not the firmware which freezes which cause this, debugging shows that the Notify ME continues to run after stopping to transmit, not placing any packets in the time wheel. Moreover, packet reception still works.)
-
 #### Card stops transmission
-Another case of card freezes is if the `halt()` command runs in Notify, or if there is a deadlock (i.e. the threads are waiting for signals which are never raised.)
+A reason for the card freezing is if the `halt()` command runs in Notify, or if there is a deadlock (i.e. the threads are waiting for signals which are never raised.)
 
 Try to place debug statements to find out if these are your culprint.
 
+#### Strange results / random packet loss
+If you get strange and inconsistent results, always remember to check if it is the testbed and not the solution. E.g. you could forget to reset the receiver after an experiment. 
+
+#### General tips
+In general when working on these cards it is very important to work iteratively. Make small modifications and check if it behaves as expected. Use debug to check if values make sense.
+
+Also, remember to read the actual Netronome documentation (ask me if you dont have access to this), and read through the original firmware to understand how Micro-C and the Agilio CX architecture works.
 ---
 
 ---
 
 ## IFI Subject recommendations
-Recommendations for other students working on the Netronome cards at IFI.
+Recommendations for other students working on the Netronome cards at IFI. Independent of what courses you take, you should preferably have experience with networking, low-level programming, and concurrent programming.
 
 **IN5050 – Programming heterogeneous multi-core architectures**
 Fun and educational course. A lot of practial programming (as opposed to many other IFI courses...). Good practice for writing reports, troubleshooting, and benchmarking. Also good for low-level programming/hardware architecture, which is essential for working on the Netronome Cards.
@@ -193,3 +318,45 @@ Good course+lecturer, fun exercises, however not *that* relevant to the thesis. 
 
 (Also, use [karakterweb](https://www.karakterweb.no/) to see difficulty and ratings of IFI subjects)
 
+
+
+## Misc
+
+### Install TC which recognizes Cake
+What is looks like if tc does not recognize:
+```bash
+sudo tc qdisc replace dev enp2s0np0 root cake bandwidth 1gbit besteffort flows
+Unknown qdisc "cake", hence option "bandwidth" is unparsable
+```
+
+Install:
+```bash
+sudo apt install -y   build-essential pkg-config bison flex   libmnl-dev libelf-dev libcap-dev zlib1g-dev
+git clone https://git.kernel.org/pub/scm/network/iproute2/iproute2.git
+cd iproute2
+git checkout v5.4.0
+./configure
+make
+sudo install -m 0755 tc/tc /usr/local/sbin/tc
+hash -r
+
+sudo modprobe sch_cake
+sudo tc qdisc replace dev enp2s0np0 root cake bandwidth 1gbit besteffort flows
+```
+
+### Install newer bpdtrace
+Kernel 5.4 has an old bpdtrace version. To install and use newer version (this worked for me):
+```bash
+mkdir -p ~/opt/bpftrace
+cd ~/opt/bpftrace
+curl -fL -o ~/opt/bpftrace/bpftrace   https://github.com/bpftrace/bpftrace/releases/download/v0.25.0/bpftrace
+chmod +x ~/opt/bpftrace/bpftrace
+./bpftrace --appimage-extract
+
+# then use installed bpdtrace with specific script:
+sudo ~/opt/bpftrace/squashfs-root/AppRun ~/master/TSO-and-Pacing/scripts/experiment/record_qlen_ifb.bt
+```
+
+# Other questions
+If you have any questions I am more than happy to help. Just send me an email at kevin.nikolai.mathisen@gmail.com
+E.g. I can provide the master thesis test data or my Zotero library of relevant papers with PDFs.
