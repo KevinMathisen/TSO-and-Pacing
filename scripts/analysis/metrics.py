@@ -49,6 +49,27 @@ def parse_iplink_total_drops(path: Path):
     except Exception:
         return -1
 
+def parse_iplink_rx(path: Path):
+    text = path.read_text()
+    if not path.exists():
+        return -1
+
+    try:
+        lines = [line.strip() for line in text.splitlines()]
+
+        # find rx/tx header + values lines
+        rx_header_idx = next(i for i, line in enumerate(lines) if line.startswith("RX:"))
+        rx_vals_idx = rx_header_idx + 1
+
+        rx_vals = lines[rx_vals_idx].split()
+
+        # iplink prints:
+        # rx: bytes packets errors dropped overrun mcast
+        rx_packets = int(rx_vals[1])
+
+        return rx_packets
+    except Exception:
+        return -1
 
 def parse_tc_drops(path: Path):
     text = path.read_text()
@@ -161,6 +182,10 @@ def main():
     client_ifb_after = parse_tc_drops(run_path / "client_tc_ifb0_after.txt")
     client_ifb_drops = diff_or_minus_one(client_ifb_before, client_ifb_after)
 
+    client_rx_before = parse_iplink_rx(run_path / "client_iplink_before.txt")
+    client_rx_after = parse_iplink_rx(run_path / "client_iplink_after.txt")
+    client_rx = diff_or_minus_one(client_rx_before, client_rx_after)
+
     external_drops = parse_dpdk_drops(dpdk_path)
 
     dumpcap_log = find_dumpcap_log(run_path)
@@ -175,12 +200,13 @@ def main():
         writer.writerow([
             "run_name", "run_num", "throughput_bps", "cpu_sender", "cpu_receiver",
             "server_drops", "client_drops", "client_ifb_drops", 
-            "external_drops", "dumpcap_drops",
+            "external_drops", "dumpcap_drops", "total_pkts",
         ])
         writer.writerow([
             run_name, run_num, throughput_bps, cpu_s, cpu_r,
             server_drops, client_drops, client_ifb_drops, 
             external_drops, dumpcap_drops,
+            client_rx,
         ])
 
 
