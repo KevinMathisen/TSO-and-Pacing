@@ -19,7 +19,7 @@ SETUPS = [
     "internet_fq",
     "datacenter_fq_codel",
 ]
-# SETUPS = ["direct-link_fq"]
+SETUPS = ["datacenter_fq"]
 
 SOLUTIONS = {
     "no-tso": "TSO Off",
@@ -242,36 +242,49 @@ def _save_close(fig, path: Path):
     fig.savefig(path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path: Path):
-    fig, (ax_thr, ax_rtt) = plt.subplots(1, 2, figsize=(8, 6), sharex=True)
+def plot_throughput(solutions: list[dict], setup: str, out_path: Path, zero_based: bool):
+    fig, ax_thr = plt.subplots(figsize=(4, 6))
 
     labels = [sol["label"] for sol in solutions]
     positions = np.arange(1, len(solutions) + 1)
     colors = [sol["color"] for sol in solutions]
 
-    # throughput
     thr_data = [(sol["throughput_bps"] / 1e9) for sol in solutions]
     thr_means = [np.mean(sol_thr) for sol_thr in thr_data]
     thr_stds = [np.std(sol_thr, ddof=1) if len(sol_thr) > 1 else 0.0 for sol_thr in thr_data]
 
-    ax_thr.bar(positions, thr_means, yerr=thr_stds, color=colors,
+    ax_thr.bar(positions, thr_means, yerr=thr_stds, color=colors, width=0.6,
                edgecolor="black", capsize=5, zorder=3)
     
-    # set ylim based on expected throughput
-    if setup in ["direct-link_fq", "direct-link_fq_codel"]:
-        ax_thr.set_ylim(7.5, 8)
-    elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
-        ax_thr.set_ylim(3.5, 4)
-    elif setup == "internet_fq":
-        ax_thr.set_ylim(1.4, 1.9)
+    if zero_based:
+        ax_thr.set_ylim(bottom=0)
+    else:
+        if setup in ["direct-link_fq", "direct-link_fq_codel"]:
+            ax_thr.set_ylim(7.5, 8.0)
+        elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
+            ax_thr.set_ylim(3.5, 4.0)
+        elif setup == "internet_fq":
+            ax_thr.set_ylim(1.4, 1.9)
 
-    ax_thr.set_title("Throughput")
     ax_thr.set_ylabel("Throughput (Gbps)")
     ax_thr.grid(True, axis="y", linestyle="--", alpha=0.5)
-    ax_thr.yaxis.set_major_locator(mticker.MultipleLocator(0.1))
+    if not zero_based:
+        ax_thr.yaxis.set_major_locator(mticker.MultipleLocator(0.1))
 
-    # RTT
-    rtt_data = [(sol["rtts"] / 1000.0) for sol in solutions]  # us -> ms
+    ax_thr.set_xticks(positions)
+    ax_thr.set_xticklabels(labels)
+    ax_thr.tick_params(axis="x", labelrotation=25, labelsize=20)
+    ax_thr.margins(x=0.05)
+
+    _save_close(fig, out_path)
+
+def plot_rtt(solutions: list[dict], setup: str, out_path: Path, zero_based: bool):
+    fig, ax_rtt = plt.subplots(figsize=(4, 6))
+
+    labels = [sol["label"] for sol in solutions]
+    positions = np.arange(1, len(solutions) + 1)
+
+    rtt_data = [(sol["rtts"] / 1000.0) for sol in solutions]
     bp_rtt = ax_rtt.boxplot(
         rtt_data,
         positions=positions,
@@ -288,15 +301,17 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     for med in bp_rtt["medians"]:
         med.set_color("black")
 
-    ax_rtt.set_title("RTT")
     ax_rtt.set_ylabel("RTT (ms)")
 
-    if setup in ["datacenter_fq_codel", "datacenter_fq"]:
-        ax_rtt.set_ylim(bottom=2)
-    elif setup == "direct-link_fq":
-        ax_rtt.set_ylim(bottom=2)
-    elif setup == "internet_fq":
-        ax_rtt.set_ylim(bottom=20)
+    if zero_based:
+        ax_rtt.set_ylim(bottom=0)
+    else:
+        if setup in ["datacenter_fq_codel", "datacenter_fq"]:
+            ax_rtt.set_ylim(bottom=2)
+        elif setup == "direct-link_fq":
+            ax_rtt.set_ylim(bottom=2)
+        elif setup == "internet_fq":
+            ax_rtt.set_ylim(bottom=20)
 
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
         ax_rtt.yaxis.set_major_locator(mticker.MultipleLocator(1))
@@ -305,17 +320,17 @@ def plot_throughput_and_rtt_boxplots(solutions: list[dict], setup: str, out_path
     elif setup == "internet_fq":
         ax_rtt.yaxis.set_major_locator(mticker.MultipleLocator(5))
 
-
     ax_rtt.grid(True, axis="y", linestyle="--", alpha=0.5)
 
-    for ax in (ax_thr, ax_rtt):
-        ax.tick_params(axis="x", labelrotation=25, labelsize=20)
-        ax.margins(x=0.05)
+    ax_rtt.set_xticks(positions)
+    ax_rtt.set_xticklabels(labels)
+    ax_rtt.tick_params(axis="x", labelrotation=25, labelsize=20)
+    ax_rtt.margins(x=0.05)
 
     _save_close(fig, out_path)
 
-def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
-    fig, (ax_sender, ax_receiver) = plt.subplots(1, 2, figsize=(8, 6), sharex=True)
+def plot_sender_cpu(solutions: list[dict], setup: str, out_path: Path):
+    fig, ax_sender = plt.subplots(figsize=(4, 6))
 
     labels = [sol["label"] for sol in solutions]
     positions = np.arange(1, len(solutions) + 1)
@@ -325,36 +340,49 @@ def plot_cpu_boxplot(solutions: list[dict], setup: str, out_path: Path):
     sender_means = [np.mean(d) for d in sender_data]
     sender_stds = [np.std(d, ddof=1) if len(d) > 1 else 0.0 for d in sender_data]
 
+    ax_sender.bar(positions, sender_means, yerr=sender_stds, width=0.6, 
+                  color=colors, edgecolor="black", capsize=5, zorder=3)
+
+    ax_sender.set_ylabel("Average CPU usage (%)")
+
+    if setup in ["direct-link_fq", "direct-link_fq_codel"]:
+        ax_sender.yaxis.set_major_locator(mticker.MultipleLocator(1))
+
+    ax_sender.grid(True, axis="y", linestyle="--", alpha=0.5)
+
+    ax_sender.set_xticks(positions)
+    ax_sender.set_xticklabels(labels)
+    ax_sender.tick_params(axis="x", labelrotation=25, labelsize=20)
+    ax_sender.margins(x=0.05)
+
+    _save_close(fig, out_path)
+
+def plot_receiver_cpu(solutions: list[dict], setup: str, out_path: Path):
+    fig, ax_receiver = plt.subplots(figsize=(4, 6))
+
+    labels = [sol["label"] for sol in solutions]
+    positions = np.arange(1, len(solutions) + 1)
+    colors = [sol["color"] for sol in solutions]
+
     receiver_data = [sol["cpu_receiver"] for sol in solutions]
     receiver_means = [np.mean(d) for d in receiver_data]
     receiver_stds = [np.std(d, ddof=1) if len(d) > 1 else 0.0 for d in receiver_data]
 
-    ax_sender.bar(positions, sender_means, yerr=sender_stds, width=0.6, 
-                  color=colors, edgecolor="black", capsize=5, zorder=3)
-
     ax_receiver.bar(positions, receiver_means, yerr=receiver_stds, width=0.6, 
                     color=colors, edgecolor="black", capsize=5, zorder=3)
 
-    ax_sender.set_title("Sender CPU")
-    ax_receiver.set_title("Receiver CPU")
-
-    ax_sender.set_ylabel("Average CPU usage (%)")
     ax_receiver.set_ylabel("Average CPU usage (%)")
 
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
-        ax_sender.yaxis.set_major_locator(mticker.MultipleLocator(1))
         ax_receiver.yaxis.set_major_locator(mticker.MultipleLocator(5))
 
-    ax_sender.grid(True, axis="y", linestyle="--", alpha=0.5)
     ax_receiver.grid(True, axis="y", linestyle="--", alpha=0.5)
 
-    for ax in (ax_sender, ax_receiver):
-        ax.set_xticks(positions)
-        ax.set_xticklabels(labels)
-        ax.tick_params(axis="x", labelrotation=25, labelsize=20)
-        ax.margins(x=0.05)
-    
-    # no legend needed
+    ax_receiver.set_xticks(positions)
+    ax_receiver.set_xticklabels(labels)
+    ax_receiver.tick_params(axis="x", labelrotation=25, labelsize=20)
+    ax_receiver.margins(x=0.05)
+
     _save_close(fig, out_path)
 
 
@@ -477,7 +505,7 @@ def plot_flows_tso_pacing_timeseries(solutions: list[dict], setup: str, out_path
 
     _save_close(fig, out_path)
 
-def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out_path: Path, xlim: int):
+def plot_cdf(solutions: list[dict], value_key: str, xlabel: str, out_path: Path, xlim_tuple: tuple=None, ylim_tuple: tuple=None):
     fig = plt.figure(figsize=(8, 6))
 
     for s in solutions:
@@ -493,7 +521,8 @@ def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out
     ax = plt.gca()
     ax.set_xscale("log")
 
-    plt.gca().yaxis.set_major_locator(mticker.MultipleLocator(0.1))
+    if xlim_tuple is None:
+        plt.gca().yaxis.set_major_locator(mticker.MultipleLocator(0.1))
 
     ax.grid(True, axis="x", linestyle="--", alpha=0.5)
     ax.tick_params(axis="x", which="both", top=True, labeltop=False)
@@ -501,15 +530,43 @@ def plot_cdf(solutions: list[dict], setup: str, value_key: str, xlabel: str, out
 
     ax.grid(True, which="major", axis="x", alpha=0.7, linestyle="--", linewidth=0.7)
 
-    plt.xlim(left=1)
-    if xlim and False:
-        plt.xlim(1, xlim)
+    if xlim_tuple:
+        plt.xlim(*xlim_tuple)
+    else:
+        plt.xlim(left=1)
+        
+    if ylim_tuple:
+        plt.ylim(*ylim_tuple)
+
     plt.xlabel(xlabel)
     plt.ylabel("Cumulative Probability")
     plt.legend()
 
     _save_close(fig, out_path)
 
+
+def plot_per_flow_idt_zoomed(solutions: list[dict], setup: str, out_path: Path):
+    xlim = None
+    ylim = None
+    
+    if setup in ["direct-link_fq", "direct-link_fq_codel"]:
+        xlim = None
+        ylim = (0.85, 1.0)
+    elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
+        xlim = (10, 1000)
+        ylim = (0.925, 1.0)
+    elif setup == "internet_fq":
+        xlim = (10, 3000)
+        ylim = (0.955, 1.0)
+        
+    plot_cdf(
+        solutions=solutions,
+        value_key="per_flow_idt_us",
+        xlabel="Inter-departure time within flow (µs)",
+        out_path=out_path,
+        xlim_tuple=xlim,
+        ylim_tuple=ylim
+    )
 
 def write_setup_plots(setup_result: dict, plots_dir: Path):
     setup = setup_result["setup"]
@@ -518,15 +575,14 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     setup_dir = plots_dir / setup
     setup_dir.mkdir(parents=True, exist_ok=True)
 
-    plot_throughput_and_rtt_boxplots(
-        solutions, setup,
-        setup_dir / "throughput_rtt_boxplots.png",
-    )
+    plot_throughput(solutions, setup, setup_dir / "throughput_zoom.png", zero_based=False)
+    plot_throughput(solutions, setup, setup_dir / "throughput.png", zero_based=True)
 
-    plot_cpu_boxplot(
-        solutions, setup,
-        setup_dir / "cpu_boxplot.png"
-    )
+    plot_rtt(solutions, setup, setup_dir / "rtt_zoom.png", zero_based=False)
+    plot_rtt(solutions, setup, setup_dir / "rtt.png", zero_based=True)
+
+    plot_sender_cpu(solutions, setup, setup_dir / "sender_cpu_zoom.png")
+    plot_receiver_cpu(solutions, setup, setup_dir / "receiver_cpu_zoom.png")
 
     plot_firstflow_timeseries(
         solutions, setup,
@@ -539,22 +595,27 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     )
 
     plot_cdf(
-        solutions, setup, "per_flow_idt_us",
+        solutions, "per_flow_idt_us",
         xlabel="Inter-departure time within flow (µs)",
-        out_path=setup_dir / "per_flow_idt_cdf.png", xlim=1100,
+        out_path=setup_dir / "per_flow_idt.png"
+    )
+
+    plot_per_flow_idt_zoomed(
+        solutions, setup,
+        setup_dir / "per_flow_idt_zoom.png"
     )
 
     plot_cdf(
-        solutions, setup, "aggregate_idt_us",
+        solutions, "aggregate_idt_us",
         xlabel="Inter-departure time across all flows in run (µs)",
-        out_path=setup_dir / "aggregate_idt_cdf.png", xlim=1100,
+        out_path=setup_dir / "aggregate_idt.png"
     )
 
     if len(solutions[0]["qlens"]) > 0:
         plot_cdf(
-            solutions, setup, "qlens",
+            solutions, "qlens",
             xlabel="FQ/pacing IFB queue length",
-            out_path=setup_dir / "qlens_cdf.png", xlim=0
+            out_path=setup_dir / "qlens.png"
         )
 
 
