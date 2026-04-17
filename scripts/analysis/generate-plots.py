@@ -19,7 +19,7 @@ SETUPS = [
     "internet_fq",
     "datacenter_fq_codel",
 ]
-SETUPS = ["datacenter_fq"]
+# SETUPS = ["datacenter_fq"]
 
 SOLUTIONS = {
     "no-tso": "TSO Off",
@@ -552,8 +552,11 @@ def plot_per_flow_idt_zoomed(solutions: list[dict], setup: str, out_path: Path):
     if setup in ["direct-link_fq", "direct-link_fq_codel"]:
         xlim = None
         ylim = (0.85, 1.0)
-    elif setup in ["datacenter_fq", "datacenter_fq_codel"]:
+    elif setup == "datacenter_fq":
         xlim = (10, 1000)
+        ylim = (0.925, 1.0)
+    elif setup ==  "datacenter_fq_codel":
+        xlim = (10, 1200)
         ylim = (0.925, 1.0)
     elif setup == "internet_fq":
         xlim = (10, 3000)
@@ -562,7 +565,7 @@ def plot_per_flow_idt_zoomed(solutions: list[dict], setup: str, out_path: Path):
     plot_cdf(
         solutions=solutions,
         value_key="per_flow_idt_us",
-        xlabel="Inter-departure time within flow (µs)",
+        xlabel="IDT within flow (µs)",
         out_path=out_path,
         xlim_tuple=xlim,
         ylim_tuple=ylim
@@ -581,8 +584,8 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
     plot_rtt(solutions, setup, setup_dir / "rtt_zoom.png", zero_based=False)
     plot_rtt(solutions, setup, setup_dir / "rtt.png", zero_based=True)
 
-    plot_sender_cpu(solutions, setup, setup_dir / "sender_cpu_zoom.png")
-    plot_receiver_cpu(solutions, setup, setup_dir / "receiver_cpu_zoom.png")
+    plot_sender_cpu(solutions, setup, setup_dir / "sender_cpu.png")
+    plot_receiver_cpu(solutions, setup, setup_dir / "receiver_cpu.png")
 
     plot_firstflow_timeseries(
         solutions, setup,
@@ -596,7 +599,7 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
 
     plot_cdf(
         solutions, "per_flow_idt_us",
-        xlabel="Inter-departure time within flow (µs)",
+        xlabel="IDT within flow (µs)",
         out_path=setup_dir / "per_flow_idt.png"
     )
 
@@ -607,7 +610,7 @@ def write_setup_plots(setup_result: dict, plots_dir: Path):
 
     plot_cdf(
         solutions, "aggregate_idt_us",
-        xlabel="Inter-departure time across all flows in run (µs)",
+        xlabel="IDT across all flows (µs)",
         out_path=setup_dir / "aggregate_idt.png"
     )
 
