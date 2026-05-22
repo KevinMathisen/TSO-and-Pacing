@@ -66,8 +66,12 @@
 /* K: pacing modifications
    Store print call counter for each CPU */
 static DEFINE_PER_CPU(u32, printk_call_counter);
-static u32 hash_to_flowid[31];
-static u32 last_flowid_idx;
+struct flow_state_entry {
+	u32 hash;
+	u64 timestamp;
+};
+static struct flow_state_entry flow_state[31];
+static u64 last_gc_time = 0;
 
 /**
  * nfp_net_get_fw_version() - Read and parse the FW version
@@ -756,10 +760,15 @@ static void nfp_net_tx_non_tso_idt(struct nfp_net_tx_desc *txd,
 {	
 	struct sock *sk;
 	unsigned long pacing_rate;
+	u16 vlan;
 	u32 packet_size;
 	u64 idt_250ns, max_idt_250ns;
 	
 	if (skb_is_gso(skb))
+		return;
+
+	vlan = le16_to_cpu(txd->vlan);
+	if (likely(!vlan)) // No vlan -> no flow ID -> should not pace
 		return;
 
 	sk = skb->sk;
@@ -782,7 +791,8 @@ static void nfp_net_tx_non_tso_idt(struct nfp_net_tx_desc *txd,
 	if (idt_250ns > 0x7FF)
 	 	idt_250ns = 0x7FF;
 	
-	txd->vlan = cpu_to_le16((u16)idt_250ns);
+	vlan |= idt_250ns;
+	txd->vlan = cpu_to_le16(vlan);
 
 }
 
@@ -803,7 +813,7 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 			   u32 md_bytes)
 {
 	u32 l3_offset, l4_offset, hdrlen;
-	u16 mss;
+	u16 mss, vlan;
 
 	if (!skb_is_gso(skb))
 		return;
@@ -832,6 +842,8 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 	/*
 	-------------- Pacing modifications ----------------
 
+	If skb is from flow in pacing state, insert its pacing rate
+
 	Instead of setting l3/l4 offset, we use the whole field 
 		(vlan/l3+l4_offset) to set the pacing rate.
 
@@ -841,6 +853,8 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 
 	Convert sk_pacing_rate (B/s) -> IDT in 250ns (11 bits -> 250ns - 0.512ms)
 	*/
+	vlan = le16_to_cpu(txd->vlan);
+	if (likely(vlan))
 	{
 		struct sock *sk;
 		unsigned long pacing_rate;
@@ -881,7 +895,8 @@ static void nfp_net_tx_tso(struct nfp_net_r_vector *r_vec,
 		+----------+----------------+
 		   5 bits       11 bits
 		*/
-		txd->vlan = cpu_to_le16((u16)idt_250ns);
+		vlan |= idt_250ns;
+		txd->vlan = cpu_to_le16(vlan);
 
 		/* Print stats from 100th to 200th call */
 		// if (this_cpu_read(printk_call_counter) < 200) {
@@ -976,49 +991,73 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 				struct sk_buff *skb) 
 {
 	/*
-	Hash to flow ID mapping:
+	Flow state:
 
-		last_flowid_idx				this maps to flowID 4 (index 3 + 1)
-			|								|
-		+----------+-------+---------+----------+-----+
-		| hash 4   |   -   | hash 1  | hash 2	| ... |
-		+----------+-------+---------+----------+-----+
-		 0    |     1        2         3             30      
+							this maps to flowID 4 (index 3 + 1)
+											|
+		+-------------+-------+---------+----------+-----+
+		| hash 4 + ts |   -   | hs1+ts  | hs2 + ts | ... |
+		+-------------+-------+---------+----------+-----+
+		 0    |        1       2         3             30      
 		      |
 		maps to flowID 1 (as 0 is reserved for no pacing)
 
 	We have 5 bits, so 32-1 = 31 concurrent flows
 	*/
 
-	u32 flow_hash;
 	u16 flowId, vlan_field;
+	u32 flow_hash;
+	u64 now;
 	int i;
 
 	flow_hash = skb_get_hash(skb);
 	if (!flow_hash) return;
 
-	/* No IDT set -> don't pace this flow (leave flowID as 0) */
-	vlan_field = le16_to_cpu(txd->vlan);
-	if (!vlan_field) return;
+
+	/* Before using flowstate, perform garbage collection if 10+ ms since last */
+	now = ktime_get_mono_fast_ns();
+	if (unlikely(now - READ_ONCE(last_gc_time) > 10ULL * NSEC_PER_MSEC)) {
+		WRITE_ONCE(last_gc_time, now);
+
+		/* If an active flow has expired, set the entry to hash 0 */
+		for (i = 0; i < 31; i++) {
+			if (READ_ONCE(flow_state[i].hash) && 
+				(now - READ_ONCE(flow_state[i].timestamp) > 10ULL * NSEC_PER_MSEC))
+				WRITE_ONCE(flow_state[i].hash, 0);
+		}
+	}
 
 	flowId = 0;
-
-	/* Check if hash is in mapping. If so use flow ID (index) here */
+	/* Check if flow is in paced state */
 	for (i = 0; i < 31; i++) {
-		if (READ_ONCE(hash_to_flowid[i]) == flow_hash) {
+		if (READ_ONCE(flow_state[i].hash) == flow_hash) {
 			flowId = i+1;
 			break;
 		}
 	}
 
-	/* If no mapping, we overwrite last/oldest flows mapping. */
+	/* If not in state, either skip or insert into state */
 	if (!flowId) {
-		unsigned int idx = READ_ONCE(last_flowid_idx)+1;
-		if (idx == 31) idx = 0;
-		WRITE_ONCE(hash_to_flowid[idx], flow_hash);
-		WRITE_ONCE(last_flowid_idx, idx);
-		flowId = idx+1;
+		/* Not above burst threshold -> dont pace */
+		if (skb_shinfo(skb)->gso_segs < 26)
+			return;
+
+		/* Insert next free slot */
+		/* If no free slot found, dont pace */
+		for (i = 0; i < 31; i++) {
+			if (READ_ONCE(flow_state[i].hash) == 0) {
+				flowId = i+1;
+				break;
+			}
+		}
+		if (!flowId)
+			return;
+
+		WRITE_ONCE(flow_state[flowId-1].hash, flow_hash);
 	}
+
+	/* Update timestamp for flow */
+	WRITE_ONCE(flow_state[flowId-1].timestamp, now);
 
 	/* 16 bit Vlan field: 
 	15       11 10              0
@@ -1027,8 +1066,7 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	+----------+----------------+
 		5 bits       11 bits
 	*/
-	vlan_field |= ((flowId & 0x1F) << 11);
-	txd->vlan = cpu_to_le16(vlan_field);
+	txd->vlan = cpu_to_le16((flowId & 0x1F) << 11);
 }
 
 static struct sk_buff *
@@ -1263,11 +1301,12 @@ static int nfp_net_tx(struct sk_buff *skb, struct net_device *netdev)
 	txd->mss = 0;
 	txd->lso_hdrlen = 0;
 
-	/* Do not reorder - tso may adjust pkt cnt, flow id may overwrite vlan field */
+	txd->vlan = 0;
+	/* Do not reorder - tso may adjust pkt cnt */
+	nfp_net_tx_set_flow_id(txd, skb);
 	nfp_net_tx_non_tso_idt(txd, skb, md_bytes);
 	nfp_net_tx_tso(r_vec, txbuf, txd, skb, md_bytes);
 	nfp_net_tx_csum(dp, r_vec, txbuf, txd, skb);
-	nfp_net_tx_set_flow_id(txd, skb);
 	
 	/* K: Skip VLAN, as we dont need it and it would overwrite pacing rate! */
 
