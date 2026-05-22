@@ -8,6 +8,15 @@ The repository contains:
  4. Scripts for development and testing at the UiO IFI setup
  5. Scripts for running experiments and analyzing the results for the Darmstadt setup
 
+Relevant repositories:
+- [Agilio CX Firmware](https://github.com/Netronome/nic-firmware)
+  - [Firmware for kernel 5.4](https://github.com/Netronome/nic-firmware/releases/tag/nic-2.1.16.1)
+- [Agilio CX Firmware for NFD_IN specifically](https://github.com/Netronome/nfd)
+- [Agilio CX Drivers](https://github.com/Netronome/nfp-drv-kmods)
+- [Atle's repo](https://github.com/atleikan/pace-tso)
+- [Per Magne's repo](https://github.com/Permki/PacedLinux)
+- [My overleaf document](https://www.overleaf.com/read/ppbcztrrzddp#2feaa4)
+
 ## Requirements
 
 ### Development environment
@@ -72,7 +81,7 @@ Administered/configured by our friends at Darmstadt.
 
 
 ## Modifying the NFP driver and CoreNIC firmware
-The NFP drivers can be modified by changing the files in the NFP driver directory you installed, then compiling it. The [`nfp_net_common.c`](modified-nfd-driver/nfp_net_common.c) file contains our modifications to the driver, and can be copied to the out-of-tree NDF driver as follows:
+The NFP drivers can be modified by changing the files in the NFP driver directory you installed, then compiling it. The [`nfp_net_common.c`](modified-nfd-driver/nfp_net_common.c) file contains our modifications to the driver, and can be copied to the out-of-tree NFD driver as follows:
 ```bash
 cp ./modified-nfd-driver/nfp_net_common.c $HOME/master/modified-nfp-oot-driver-2019/src/
 ```
@@ -257,7 +266,7 @@ mv "$PARSED_CSV.sorted" "$PARSED_CSV"
 
 
 ## Help, nothing works! 
-So, you want to modify and compile custom drivers+firmware for the Agilio CX... and things are not working? Here are at least some problems I encountered and how I solved them:
+So, you want to modify and compile custom drivers+firmware for the Agilio CX... and things are not working? Here are some problems I encountered and how I solved them:
 
 #### Hardware not recognized
 Sometimes (seemingly at random) the NFP driver load fails. This can be seen by... the fact that the interface does not work, e.g. you can't ping the other netronome card.
@@ -330,15 +339,6 @@ chmod +x ~/opt/bpftrace/bpftrace
 sudo ~/opt/bpftrace/squashfs-root/AppRun ~/master/TSO-and-Pacing/scripts/experiment/record_qlen_ifb.bt
 ```
 
-### Overview of relevant repositories:
-- [Agilio CX Firmware](https://github.com/Netronome/nic-firmware)
-  - [Firmware for kernel 5.4](https://github.com/Netronome/nic-firmware/releases/tag/nic-2.1.16.1)
-- [Agilio CX Firmware for NFD_IN specifically](https://github.com/Netronome/nfd)
-- [Agilio CX Drivers](https://github.com/Netronome/nfp-drv-kmods)
-- [Atle's repo](https://github.com/atleikan/pace-tso)
-- [Per Magne's repo](https://github.com/Permki/PacedLinux)
-- [My overleaf document](https://www.overleaf.com/read/ppbcztrrzddp#2feaa4)
-
 ### IFI Subject recommendations
 Recommendations for other students working on the Netronome cards at IFI. Independent of what courses you take, you should preferably have experience with networking, low-level programming, and concurrent programming.
 
@@ -362,8 +362,6 @@ Good course+lecturer, fun exercises, however not *that* relevant to the thesis. 
 
 (Also, use [karakterweb](https://www.karakterweb.no/) to see difficulty and ratings of IFI subjects)
 
-
-
-# Other questions
+## Other questions
 If you have any questions I am more than happy to help. Just send me an email at kevin.nikolai.mathisen@gmail.com
 E.g. I can provide the master thesis test data or my Zotero library of relevant papers with PDFs.
