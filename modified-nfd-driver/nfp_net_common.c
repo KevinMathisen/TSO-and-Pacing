@@ -63,15 +63,20 @@
 #include "nfp_port.h"
 #include "crypto/crypto.h"
 
+#include <linux/jiffies.h>
+
+#define NFP_FLOW_SLOTS		31U
+#define BURST_THRESH		26U
+#define NFP_FLOW_TIMEOUT_J	msecs_to_jiffies(10)
+
 /* K: pacing modifications
    Store print call counter for each CPU */
-static DEFINE_PER_CPU(u32, printk_call_counter);
+// static DEFINE_PER_CPU(u32, printk_call_counter);
 struct flow_state_entry {
 	u32 hash;
-	u64 timestamp;
+	unsigned long expires;
 };
-static struct flow_state_entry flow_state[31];
-static u64 last_gc_time = 0;
+static struct flow_state_entry flow_state[NFP_FLOW_SLOTS];
 
 /**
  * nfp_net_get_fw_version() - Read and parse the FW version
@@ -1005,31 +1010,18 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	We have 5 bits, so 32-1 = 31 concurrent flows
 	*/
 
-	u16 flowId, vlan_field;
+	u16 flowId;
 	u32 flow_hash;
-	u64 now;
+	unsigned long now;
 	int i;
 
 	flow_hash = skb_get_hash(skb);
-	if (!flow_hash) return;
+	if (unlikely(!flow_hash)) return;
 
-
-	/* Before using flowstate, perform garbage collection if 10+ ms since last */
-	now = ktime_get_mono_fast_ns();
-	if (unlikely(now - READ_ONCE(last_gc_time) > 10ULL * NSEC_PER_MSEC)) {
-		WRITE_ONCE(last_gc_time, now);
-
-		/* If an active flow has expired, set the entry to hash 0 */
-		for (i = 0; i < 31; i++) {
-			if (READ_ONCE(flow_state[i].hash) && 
-				(now - READ_ONCE(flow_state[i].timestamp) > 10ULL * NSEC_PER_MSEC))
-				WRITE_ONCE(flow_state[i].hash, 0);
-		}
-	}
-
+	
 	flowId = 0;
 	/* Check if flow is in paced state */
-	for (i = 0; i < 31; i++) {
+	for (i = 0; i < NFP_FLOW_SLOTS; i++) {
 		if (READ_ONCE(flow_state[i].hash) == flow_hash) {
 			flowId = i+1;
 			break;
@@ -1039,17 +1031,20 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	/* If not in state, either skip or insert into state */
 	if (!flowId) {
 		/* Not above burst threshold -> dont pace */
-		if (skb_shinfo(skb)->gso_segs < 26)
+		if (skb_shinfo(skb)->gso_segs < BURST_THRESH)
 			return;
 
-		/* Insert next free slot */
-		/* If no free slot found, dont pace */
-		for (i = 0; i < 31; i++) {
-			if (READ_ONCE(flow_state[i].hash) == 0) {
+		now = jiffies;
+
+		/* Insert next free slot (first flow with expired timer) */
+		for (i = 0; i < NFP_FLOW_SLOTS; i++) {
+			if (READ_ONCE(flow_state[i].hash) == 0 || 
+				time_after_eq(now, flow_state[i].expires)) {
 				flowId = i+1;
 				break;
 			}
 		}
+		/* If no free slot found, dont pace */
 		if (!flowId)
 			return;
 
@@ -1057,7 +1052,7 @@ static void nfp_net_tx_set_flow_id(struct nfp_net_tx_desc *txd,
 	}
 
 	/* Update timestamp for flow */
-	WRITE_ONCE(flow_state[flowId-1].timestamp, now);
+	WRITE_ONCE(flow_state[flowId-1].expires, jiffies+NFP_FLOW_TIMEOUT_J);
 
 	/* 16 bit Vlan field: 
 	15       11 10              0
