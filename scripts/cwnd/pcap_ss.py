@@ -62,14 +62,27 @@ try:
     line = infile.readline().replace(",", "").split()
     prev_ackno = int(-1); loss_seqno = int(-1)
     firstTime = float(-1); first_seqno = float(-1)
+
+    bulk_started = False
+    
     while len(line)>0:
         # Everything begins with the first sent data packet.
         if not ( ("S" in line[6]) or ("F" in line[6]) ):
-            if firstTime < 0 and same_address(src, line[2]) and line[7]=="seq":
+            if not bulk_started and same_address(src, line[2]):
+                try:
+                    length_idx = line.index("length")
+                    payload_len = int(line[length_idx + 1])
+                    if payload_len >= 1000:
+                        bulk_started = True
+                except (ValueError, IndexError):
+                    pass
+
+            # Only set firstTime after bulk has started
+            if firstTime < 0 and bulk_started and same_address(src, line[2]) and line[7]=="seq":
                 firstTime = float(line[0])
                 first_seqno = float(line[8].split(":")[0])
 
-        if same_address(dst, line[2]) and line[7]=="ack":
+        if bulk_started and same_address(dst, line[2]) and line[7]=="ack":
             ackno = int(line[8])
             if ackno <= prev_ackno:
                 loss_seqno = prev_ackno
@@ -87,62 +100,34 @@ try:
 
     prev_seqno = first_seqno; prev_ackno = first_seqno
     sndwnd = cwnd; loss = False
-    prev_snd_time = float(-1.0); prev_ack_time = float(-1.0);
 
     line = infile.readline().replace(",", "").split()
     while len(line)>0:
         time = float(line[0])
         if (not ( ("S" in line[6]) or ("F" in line[6]) )) and time >= firstTime:
 
-#           print((time-firstTime), end=" ")
             if same_address(src, line[2]) and line[7]=="seq":
                 seqnos = line[8].split(":")
                 seqnos[0]=float(seqnos[0]); seqnos[1]=float(seqnos[1])
 
-                # Determine time gap
-                snd_timegap = time - prev_snd_time if prev_snd_time > 0 else -1.0
-                prev_snd_time = time
-
+                # When a retransmission is detected, slow start has exited.
+                # Print the final cwnd achieved and stop parsing.
                 if seqnos[1] <= prev_seqno:
-                    print((time-firstTime), "ssthresh", cwnd/2.0, "snd_timegap", snd_timegap)
+                    print(cwnd)
                     break
                 prev_seqno = seqnos[1]
 
                 sent = (seqnos[1]-seqnos[0])/mss
                 sndwnd -= sent
-    #                 seqnos[0] = float(seqnos[0].replace(",", ""))
-    #                 seqnos[1] = float(seqnos[1].replace(",", ""))
-                print((time-firstTime), "snd", sent,
-                    "cwnd", cwnd, "sndwnd", sndwnd,  "snd_timegap", snd_timegap, end="")
-                if seqnos[0] <= loss_seqno < seqnos[1] and not loss:
-                    print(" firstloss seqno_range",
-                        str(int(seqnos[0])) + ":" + str(int(seqnos[1])))
-                    loss = True
-                else:
-                    print()
 
             elif same_address(dst, line[2]) and line[7]=="ack":
-
-                # Determine time gap
-                ack_timegap = time - prev_ack_time if prev_ack_time > 0 else -1.0
-                prev_ack_time = time
 
                 ackno = float(line[8])
                 acked = (ackno-prev_ackno)/mss
                 prev_ackno=ackno
                 cwnd += acked
                 sndwnd += 2.0*acked     # ack-clocking and cwnd incr
-                print((time-firstTime), "ack", acked, "cwnd", cwnd, "sndwnd", sndwnd,
-                     "ack_timegap", ack_timegap, end="")
-                if ackno == loss_seqno:
-                    print(" firstloss_dupack", "ackno", int(ackno))
-                else:
-                    print()
 
-
-    # #                print(time-firstTime, (float(seqnos[1])-float(seqnos[0]) / float(mss) ) )
-
-# end of reading loop
         line = infile.readline().replace(",", "").split()
 
     infile.close()
