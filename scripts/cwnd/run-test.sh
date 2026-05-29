@@ -34,7 +34,7 @@ CONDITION="$1"
 # ----------------
 SENDER_IP="10.0.2.1"
 RECEIVER_IP="10.0.2.2"       # Receiver IP address
-IFACE="enp2s0np0"        # Sender interface carrying the TCP flow
+IFACE="enp3s0np1"        # Sender interface carrying the TCP flow
 
 USER="kevinm"
 RECEIVER_SSH="$USER@172.16.5.201"

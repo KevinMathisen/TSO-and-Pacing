@@ -12,7 +12,7 @@ if [[ $# -ne 1 ]]; then
 fi
 
 QLEN="$1"
-DEV="enp1s0np0"
+DEV="enp1s0np1"
 
 ethtool -K "$DEV" gro off lro off gso off tso off
 
