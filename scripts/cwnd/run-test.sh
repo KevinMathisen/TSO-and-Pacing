@@ -43,14 +43,14 @@ SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/cwnd"
 PORT="5201"
 CC="reno"
 
-RUNS=2 # 2 for testing, 20 for final
+RUNS=20 # 2 for testing, 20 for final
 DURATION=2              # seconds per iperf3 run
 OUT_ROOT="results/"
 # ----------------
 
 CAP_PID=""
 
-QUEUE_LENS=(8 16 24 32 48 64 128 256 512)
+QUEUE_LENS=(8 16 24 32 48 64 128 256 512 1024)
 
 for QUEUE_PKTS in "${QUEUE_LENS[@]}"; do
 
@@ -101,7 +101,7 @@ for QUEUE_PKTS in "${QUEUE_LENS[@]}"; do
 
         # Analyze pcap 
         tcpdump -ntt -r "${STEM}.pcap" > "${STEM}_input.txt"
-        python3 pcap_ss.py input.txt "${SENDER_IP}" X "${RECEIVER_IP}" X 1448 > ${STEM}.txt
+        python3 pcap_ss.py "${STEM}_input.txt" "${SENDER_IP}" X "${RECEIVER_IP}" X 1448 > ${STEM}.txt
 
         # delete pcap
         rm "${STEM}.pcap" "${STEM}_input.txt"
