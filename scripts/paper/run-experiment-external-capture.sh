@@ -82,7 +82,6 @@ SCRIPT_PATH="$HOME/master/TSO-and-Pacing/scripts/paper"
 DUR=12   # seconds to run
 START_CAPTURE=5 # second to start capture
 
-RUN_NUM=""
 FLOWS=4 
 
 
