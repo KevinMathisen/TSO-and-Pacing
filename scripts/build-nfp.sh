@@ -20,7 +20,7 @@ ORG_DRV_TREE="$HOME/master/nfp-oot-driver-2019"
 
 FW_NAME="nic_AMDA0096-0001_2x10.nffw"
 FW_DST_DIR="/lib/firmware/netronome"
-NFP_IF="enp2s0np0"
+NFP_IF="enp3s0np0"
 DRV_DST_DIR="/lib/modules/$(uname -r)/updates/"
 SKIP_FW=false
 SKIP_DRIVER=false
@@ -157,7 +157,7 @@ if [ "$SKIP_CHECK" = false ]; then
 
   echo ""
   echo "==== offloads (expect TSO on) ===="
-  ethtool -K enp2s0np0 tso on gso on
+  ethtool -K "$NFP_IF" tso on gso on
   ethtool -k "$NFP_IF" | egrep 'tcp-segmentation-offload'
 
   # set correct ip for interface
