@@ -35,7 +35,7 @@ trap cleanup EXIT INT TERM
 setup_server() {
   local tso_flag mode_flag qdisc_flag
   case "$TREATMENT" in
-    no-tso) tso_flag="--no-tso" ;;
+    cake) tso_flag="--no-tso" ;;
     tso) tso_flag="--tso" ;;
     tso-pacing) tso_flag="--tso-pacing" ;;
   esac
@@ -85,7 +85,7 @@ save_client_stats() {
 SERVER_IP="10.0.1.1" # fleming
 CLIENT_IP="10.0.1.2" # munnin
 
-SERVER_DEV="enp2s0np0"
+SERVER_DEV="enp3s0np0"
 CLIENT_DEV="enp1s0np0"
 
 USER="kevinm"
@@ -107,7 +107,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --run-num)
       RUN_NUM="$2"; shift 2 ;;
-    --no-tso)       TREATMENT="no-tso"; shift ;;
+    --no-tso)       TREATMENT="cake"; shift ;;
     --tso)          TREATMENT="tso"; shift ;;
     --tso-pacing)   TREATMENT="tso-pacing"; shift ;;
     --direct-link)  CONNECTION_MODE="direct-link"; shift ;;
@@ -225,7 +225,7 @@ save_client_stats after
 
 # save qdisc used on server
 tc -s qdisc show dev "$SERVER_DEV" > "$OUT_DIR/server_qdisc.txt" || true
-sudo ethtool -k enp2s0np0  | grep "segmentation-offload" >> "$OUT_DIR/server_qdisc.txt" || true
+sudo ethtool -k "$SERVER_DEV"  | grep "segmentation-offload" >> "$OUT_DIR/server_qdisc.txt" || true
 
 
 # change owner of output to user

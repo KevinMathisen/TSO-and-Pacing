@@ -85,7 +85,7 @@ save_client_stats() {
 SERVER_IP="10.0.2.1" # fleming
 CLIENT_IP="10.0.2.2" # munnin
 
-SERVER_DEV="enp2s0np0"
+SERVER_DEV="enp3s0np0"
 CLIENT_DEV="enp1s0np0"
 
 USER="kevinm"

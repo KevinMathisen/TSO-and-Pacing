@@ -6,7 +6,7 @@ if (( EUID != 0 )); then
   exit 1
 fi
 
-DEV="enp2s0np0"
+DEV="enp3s0np0"
 # 1 = no TSO, 2 = TSO, 3 = TSO + our solution
 TREATMENT=1
 
@@ -40,34 +40,14 @@ cpufreq-set -g performance
 
 if [ "$TREATMENT" = 1 ]; then
     ethtool -K "$DEV" tso off gso off
+    tc qdisc replace dev "$DEV" root cake besteffort flows split-gso bandwidth 4.1Gbit
 else
     ethtool -K "$DEV" tso on gso on
+    tc qdisc replace dev "$DEV" root fq
 fi
-
-sysctl -w net.ipv4.tcp_congestion_control="$CCA"
-if [ "$CCA" = "dctcp" ]; then
-    sysctl -w net.ipv4.tcp_ecn=1
-else
-    sysctl -w net.ipv4.tcp_ecn=0
-fi
-
-tc qdisc replace dev "$DEV" root "$QDISC"
 
 # Set lower mtu to allow space for P4 timestamps
 ip link set dev "$DEV" mtu 1480
-# use cake to minimize bursts
-tc qdisc replace dev "$DEV" root cake besteffort flows no-split-gso
 
-if [ "$CONNECTION_MODE" = "internet" ]; then 
-    echo "Configured for Internet (cubic)"
 
-elif [[ "$CONNECTION_MODE" = "datacenter" ]]; then
-    echo "Configured for Datacenter (cubic)"
-
-else 
-    # since timestamp increase packet size, ensure we dont sendt too many packets and cause packet loss
-    tc qdisc replace dev "$DEV" root fq maxrate 2gbit
-
-    echo "Configured for Direct-link (cubic)"
-
-fi
+echo "Configured sender for ${TREATMENT}"

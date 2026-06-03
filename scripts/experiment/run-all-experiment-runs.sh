@@ -36,16 +36,12 @@ run_setup () {
   done
 }
 
-# run experiments for all connection modes (all with fq)
-MODES=(--direct-link --internet --datacenter)
+# run experiments for all connection modes
+MODES=(--direct-link --datacenter)
 
 for mode in "${MODES[@]}"; do
   run_setup "$mode" --fq "--$TREATMENT"
 done
-
-# run experiment with fq_codel and datacenter
-run_setup --datacenter --fq-codel "--$TREATMENT"
-
 
 
 echo "================================================================="
