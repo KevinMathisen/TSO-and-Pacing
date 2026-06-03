@@ -31,11 +31,11 @@ tc qdisc add dev $DEV handle ffff: ingress
 tc filter add dev $DEV parent ffff: protocol ip u32 match u32 0 0 \
         action mirred egress redirect dev ifb0
 
-# egress 20 ms delay
-tc qdisc replace dev $DEV root netem delay 20ms limit 50000
+# egress 10 ms delay
+tc qdisc replace dev $DEV root netem delay 10ms limit 50000
 
-# ---- ingress 1 Gbps ---- 
-RATE=1000mbit
+# ---- ingress 4 Gbps ---- 
+RATE=4000mbit
 
 tc qdisc add dev ifb0 root fq \
     maxrate "$RATE" \
